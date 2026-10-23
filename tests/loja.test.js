@@ -70,7 +70,7 @@ test('nunca aparece a mesma carta duas vezes na mesa (sua mão, vira e mão do a
   const checar = (j) => {
     const rd = j.rodada;
     const minhas = j.run.mesa.mao.map((id) => vis(j.carta(id)));
-    const todas = [...minhas, ...rd.viras.map(vis), ...rd.maoAdv.map(vis)];
+    const todas = [...minhas, ...rd.viras.map(vis), ...rd.maoAdv.map(vis), ...(rd.maoParceiro ?? []).map(vis), ...(rd.maoAdv2 ?? []).map(vis)];
     assert.equal(new Set(todas).size, todas.length, `carta repetida: ${todas}`);
     maos++;
   };

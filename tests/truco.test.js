@@ -76,7 +76,7 @@ test('aumentar devolve o pedido; correr dá ao outro o valor já aceito', () => 
   pedirTruco(st, 0); // pede 3
   responderTruco(st, 1, 'aumentar'); // aceita 3 e pede 6
   assert.equal(st.valor, 3);
-  assert.deepEqual(st.pedido, { por: 1, valor: 6 });
+  assert.deepEqual(st.pedido, { por: 1, jogador: 1, valor: 6 });
   responderTruco(st, 0, 'correr');
   assert.ok(st.fim);
   assert.equal(st.vencedor, 1);
@@ -104,7 +104,7 @@ test('não passa de 12', () => {
   responderTruco(st, 1, 'aumentar'); // 6
   responderTruco(st, 0, 'aumentar'); // 9
   responderTruco(st, 1, 'aumentar'); // 12
-  assert.deepEqual(st.pedido, { por: 1, valor: 12 });
+  assert.deepEqual(st.pedido, { por: 1, jogador: 1, valor: 12 });
   assert.throws(() => responderTruco(st, 0, 'aumentar'));
   responderTruco(st, 0, 'aceitar');
   assert.equal(st.valor, 12);

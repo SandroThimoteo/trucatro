@@ -14,6 +14,25 @@ const ls = {
   del(k) { try { localStorage.removeItem(k); } catch { /* ignora */ } },
 };
 
+// Ranking só deste navegador (sem banco): guarda o melhor resultado de cada dia
+const CHAVE_DESAFIOS = 'trucatro.desafios.v1';
+function desafioLocal(nome = 'Você') {
+  return {
+    global: false,
+    async enviar(res) {
+      const todos = lerJSON(CHAVE_DESAFIOS) ?? {};
+      const atual = todos[res.dia];
+      if (!atual || res.pontos > atual.pontos) todos[res.dia] = { nome, pontos: res.pontos, bairro: res.bairro, mesas: res.mesas };
+      ls.set(CHAVE_DESAFIOS, JSON.stringify(todos));
+      return this.ranking(res.dia);
+    },
+    async ranking(dia) {
+      const r = (lerJSON(CHAVE_DESAFIOS) ?? {})[dia];
+      return r ? [r] : [];
+    },
+  };
+}
+
 function lerJSON(k) {
   const s = ls.get(k);
   if (!s) return null;
@@ -26,6 +45,7 @@ function contaLocal() {
     tipo: 'local',
     nome: '',
     logado: false,
+    desafio: desafioLocal(),
     async carregar() {
       const p = lerJSON(CHAVE_LOCAL);
       const antigo = ls.get(CHAVE_SAVE_ANTIGO);
@@ -48,10 +68,28 @@ async function contaClaude() {
   const me = await user.me();
   const doc = db.doc(`data/users/${id}/perfil`);
   let gravando = Promise.resolve();
+  // Ranking do dia no banco compartilhado do artifact: guarda só o id de quem jogou;
+  // o nome vem na hora de mostrar (user.profiles).
+  const desafio = {
+    global: true,
+    async enviar(res) {
+      const ref = db.doc(`desafios/${res.dia}/placar/${id}`);
+      const atual = await ref.get().catch(() => null);
+      if (!atual?.exists || (atual.data().pontos ?? 0) < res.pontos) await ref.set({ uid: id, pontos: res.pontos, bairro: res.bairro, mesas: res.mesas });
+      return this.ranking(res.dia);
+    },
+    async ranking(dia) {
+      const snap = await db.collection(`desafios/${dia}/placar`).orderBy('pontos', 'desc').limit(50).get();
+      const linhas = snap.docs.map((d) => d.data());
+      const perfis = linhas.length ? await user.profiles(linhas.map((l) => l.uid)) : {};
+      return linhas.map((l) => ({ nome: perfis[l.uid]?.name || 'Alguém', pontos: l.pontos, bairro: l.bairro, mesas: l.mesas, eu: l.uid === id }));
+    },
+  };
   return {
     tipo: 'claude',
     nome: me.name || 'Você',
     logado: true,
+    desafio,
     async carregar() {
       const snap = await doc.get();
       return snap.exists ? snap.data() : null;
@@ -96,6 +134,10 @@ function backendSupabase(cfg) {
     sair: (token) => rpc('trucatro_sair', { p_token: token }),
     carregar: async (token) => (await rpc('trucatro_carregar', { p_token: token })).perfil,
     salvar: (token, perfil) => rpc('trucatro_salvar', { p_token: token, p_perfil: perfil }, { manter: true }),
+    desafio: {
+      enviar: (token, res) => rpc('trucatro_desafio_enviar', { p_token: token, p_dia: res.dia, p_pontos: res.pontos, p_bairro: res.bairro, p_mesas: res.mesas }),
+      ranking: (dia) => rpc('trucatro_desafio_ranking', { p_dia: dia }),
+    },
     admin: {
       jogadores: (token) => rpc('trucatro_admin_jogadores', { p_token: token }),
       definir: (token, nome, tampinhas, reis) => rpc('trucatro_admin_definir', { p_token: token, p_nome: nome, p_tampinhas: tampinhas, p_reis: reis }),
@@ -141,6 +183,13 @@ function contaDoBackend(backend, token, eu) {
     nome: eu.nome,
     admin: !!eu.admin && !!backend.admin,
     logado: true,
+    desafio: backend.desafio
+      ? {
+        global: true,
+        enviar: async (res) => (await backend.desafio.enviar(token, res)).map((l) => ({ ...l, eu: l.nome === eu.nome })),
+        ranking: async (dia) => (await backend.desafio.ranking(dia)).map((l) => ({ ...l, eu: l.nome === eu.nome })),
+      }
+      : desafioLocal(eu.nome),
     carregar: () => backend.carregar(token),
     // Devolve { ajustes } quando o admin mudou Tampinhas/réis enquanto você jogava
     salvar: (perfil) => backend.salvar(token, perfil),

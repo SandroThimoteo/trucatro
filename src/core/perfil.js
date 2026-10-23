@@ -34,6 +34,8 @@ export function normalizarPerfil(dados, p) {
     equipado,
     recordes: { runs: 0, vitorias: 0, melhorBairro: 0, maiorMao: 0, chefoesVencidos: 0, tampinhasTotal: 0, ...(base.recordes ?? {}) },
     opcoes: { musica: 0.5, ambiente: 0.5, efeitos: 0.8, vozes: 0.9, mudo: false, ...(base.opcoes ?? {}) },
+    // Desafio do dia: melhor resultado valendo de cada dia (YYYY-MM-DD)
+    desafios: base.desafios && typeof base.desafios === 'object' && !Array.isArray(base.desafios) ? base.desafios : {},
     save: typeof base.save === 'string' ? base.save : null,
     atualizadoEm: base.atualizadoEm ?? 0,
   };

@@ -3,6 +3,9 @@
 import { ARQUIVOS_DADOS, montarDados, defConsumivel, perfilDe, falasDe } from '../core/dados.js';
 import { Jogo, TIPOS_MESA, NOME_MESA } from '../core/run.js';
 import { PartidaClassica } from '../core/partida.js';
+import { PartidaDupla } from '../core/partidaDupla.js';
+import { SINAIS } from '../core/ai.js';
+import { diaDeHoje, sementeDoDia, resumoDesafio, BARALHO_DESAFIO, TAMPINHAS_DESAFIO } from '../core/desafio.js';
 import { GameEventBus } from '../core/events.js';
 import { randomSeed } from '../core/rng.js';
 import { RANKS, SUITS, SUIT_NOME } from '../core/cards.js';
@@ -46,7 +49,10 @@ const app = {
   perfil: null,
   salvoErro: false,
   bazarCat: 'verso',
+  ranking: null, // Desafio do dia: { dia, linhas, erro }
 };
+
+const dupla = () => app.partida instanceof PartidaDupla;
 
 // ---------- perfil e salvamento ----------
 
@@ -123,7 +129,39 @@ function sincronizarPerfil() {
   if ((r.fase === 'derrota' || r.fase === 'vitoria') && !r.registradoNoPerfil) {
     registrarFimDeRun(app.perfil, r);
     r.registradoNoPerfil = true;
+    if (r.desafio) enviarDesafio(r);
   }
+}
+
+async function enviarDesafio(r) {
+  const res = resumoDesafio(r);
+  const ja = app.perfil.desafios[res.dia];
+  r.desafioResultado = { ...res, valeu: !ja };
+  if (ja) return;
+  app.perfil.desafios[res.dia] = { pontos: res.pontos, bairro: res.bairro, mesas: res.mesas };
+  app.perfil.tampinhas += TAMPINHAS_DESAFIO;
+  r.desafioResultado.tampinhas = TAMPINHAS_DESAFIO;
+  salvarPerfil();
+  try {
+    const linhas = await app.usuario.conta.desafio.enviar(res);
+    app.ranking = { dia: res.dia, linhas };
+    r.desafioResultado.posicao = linhas.findIndex((l) => l.eu || (l.pontos === res.pontos && !app.usuario.conta.desafio.global)) + 1 || null;
+  } catch (e) {
+    r.desafioResultado.erro = e.message;
+  }
+  render();
+}
+
+async function carregarRanking() {
+  const dia = diaDeHoje();
+  app.ranking = { dia, linhas: null };
+  render();
+  try {
+    app.ranking = { dia, linhas: await app.usuario.conta.desafio.ranking(dia) };
+  } catch (e) {
+    app.ranking = { dia, linhas: [], erro: e.message };
+  }
+  render();
 }
 
 function lerSave() { return app.perfil?.save ?? null; }
@@ -276,14 +314,14 @@ async function tocarFila() {
       const grito = equipado('falaTruco');
       if (meu) falarJogador(pick(grito.falas.pedir));
       const texto = meu && ev.valor === 3 ? grito.carimbo : NOME_VALOR[ev.valor] ?? 'TRUCO!';
-      await carimbo(texto, meu ? 'você pediu' : 'o adversário pediu');
+      await carimbo(texto, meu ? 'você pediu' : ev.jogador === 2 ? 'seu parceiro pediu' : 'o adversário pediu');
     } else if (ev.tipo === 'OnTrucoRespondido') {
       if (ev.resposta === 'aumentar') {
         audio.tocar('truco');
         if (meu) falarJogador(pick(equipado('falaTruco').falas.aumentar));
-        await carimbo(NOME_VALOR[ev.valor], meu ? 'você aumentou' : 'o adversário aumentou');
+        await carimbo(NOME_VALOR[ev.valor], meu ? 'você aumentou' : ev.jogador === 2 ? 'seu parceiro aumentou' : 'o adversário aumentou');
       } else if (ev.resposta === 'correr') {
-        await carimbo('CORREU!', meu ? 'você correu' : 'o adversário correu');
+        await carimbo('CORREU!', meu || ev.jogador === 2 ? 'vocês correram' : 'o adversário correu');
       } else if (!meu) toast('O adversário aceitou: desce!');
     } else if (ev.tipo === 'OnVazaResolvida') {
       audio.tocar(ev.vaza.vencedor === 0 ? 'vazaGanha' : ev.vaza.vencedor === 1 ? 'vazaPerdida' : 'clique');
@@ -357,13 +395,13 @@ async function executar(fn, { limparSel = true } = {}) {
 }
 
 function coletarClassico() {
-  if (app.tela !== 'classico' || !app.partida?.ultimosEventos) return;
+  if (app.tela !== 'classico' || !app.partida?.ultimosEventos?.length) return;
   app.fila.push(...app.partida.ultimosEventos);
   app.partida.ultimosEventos = null;
 }
 
 function falarClassico(acao) {
-  const pessoa = app.dados.personagensPorId[CLASSICO_PESSOA];
+  const pessoa = app.dados.personagensPorId[dupla() ? app.partida.pessoas[acao.jogador] : CLASSICO_PESSOA];
   let momento = null;
   if (acao.tipo === 'pedir') momento = 'pedir';
   else if (acao.tipo === 'responder') momento = acao.resposta;
@@ -373,10 +411,10 @@ function falarClassico(acao) {
 
 // ---------- ações ----------
 
-function novaRunCom(seed, baralhoId) {
+function novaRunCom(seed, baralhoId, desafio = null) {
   const bus = new GameEventBus();
   bus.on('*', (ev) => app.fila.push(ev));
-  app.jogo = Jogo.novaRun(app.dados, { seed, baralhoId }, bus);
+  app.jogo = Jogo.novaRun(app.dados, { seed, baralhoId, desafio }, bus);
   app.tela = 'jogo';
   app.resumo = false;
   app.conta = null;
@@ -389,6 +427,47 @@ const acoes = {
   irSelecao() { app.tela = 'selecao'; app.seed = randomSeed(); },
   irColecao() { app.tela = 'colecao'; },
   irBazar() { app.tela = 'bazar'; },
+  irDesafio() { app.tela = 'desafio'; carregarRanking(); },
+  jogarDesafio() {
+    const dia = diaDeHoje();
+    novaRunCom(sementeDoDia(dia), BARALHO_DESAFIO, dia);
+    if (app.perfil.desafios[dia]) toast('Você já jogou o desafio de hoje: esta vale como treino.');
+    executar(() => {});
+  },
+  trucoDupla() {
+    const s = randomSeed();
+    const gente = app.dados.personagens.filter((x) => x.tipo !== 'chefao');
+    const sorteio = [...gente].sort(() => Math.random() - 0.5).slice(0, 3);
+    const pessoas = { 1: sorteio[0].id, 2: sorteio[1].id, 3: sorteio[2].id };
+    const perfis = Object.fromEntries(Object.entries(pessoas).map(([j, id]) => [j, perfilDe(app.dados, app.dados.personagensPorId[id])]));
+    app.partida = new PartidaDupla({ seed: s, perfis, pontosVitoria: app.dados.regras.classico.pontosVitoria });
+    app.partida.pessoas = pessoas;
+    app.tela = 'classico';
+    app.falaClassico = null;
+    app.sel = [];
+    executar(() => {});
+  },
+  sinalizar(chave) {
+    if (app.tela === 'classico') return executar(() => app.partida.sinalizar(chave), { limparSel: false });
+    executar(() => app.jogo.sinalizar(chave), { limparSel: false });
+  },
+  async evento(i) {
+    const j = app.jogo;
+    const ev = j.evento;
+    let res;
+    try {
+      res = j.resolverEvento(Number(i));
+    } catch (e) {
+      toast(e.message);
+      return render();
+    }
+    gravarSave();
+    if (res.roleta) await girarRoleta(app.dados.eventos.roleta, res.roleta.indice);
+    const textos = res.textos.join(' · ');
+    if (textos) toast(`${ev.icone} ${textos}`);
+    audio.tocar(res.roleta && !res.roleta.bom ? 'derrota' : 'moeda');
+    render();
+  },
   irLogin() { app.tela = 'login'; },
   escolherBaralho(id) { app.baralhoSel = id; },
   novaSeed() { app.seed = randomSeed(); },
@@ -652,7 +731,7 @@ function carregarAdmin() {
 
 function acaoCartaClassico(id) {
   const p = app.partida;
-  if (p.fase !== 'jogo' || p.mao.vez !== 0 || p.mao.pedido) return;
+  if (p.fase !== 'jogo' || p.mao.vez !== 0 || p.mao.pedido || p.fase === 'onze') return;
   if (app.sel[0] === id) return executar(() => p.jogar(id));
   app.sel = [id];
   audio.tocar('selecionar');
@@ -729,7 +808,8 @@ function render() {
   else if (app.tela === 'colecao') html = telaColecao();
   else if (app.tela === 'bazar') html = telaBazar();
   else if (app.tela === 'admin') html = telaAdmin();
-  else if (app.tela === 'classico') html = telaClassico();
+  else if (app.tela === 'classico') html = dupla() ? telaDupla() : telaClassico();
+  else if (app.tela === 'desafio') html = telaDesafio();
   else if (app.tela === 'jogo') html = telaJogo();
   const foco = document.activeElement?.id;
   const valores = {};
@@ -805,7 +885,9 @@ function telaMenu() {
     <div class="botoes">
       ${saveContinuavel() ? '<button class="btn amarelo acao" data-acao="continuar">Continuar run</button>' : ''}
       <button class="btn truco acao" data-acao="irSelecao">Nova run</button>
+      <button class="btn amarelo acao" data-acao="irDesafio">Desafio do dia</button>
       <button class="btn acao" data-acao="classico">Truco clássico</button>
+      <button class="btn acao" data-acao="trucoDupla">Truco em dupla</button>
       <button class="btn acao" data-acao="irBazar">Bazar das Tampinhas</button>
       ${app.usuario.conta.admin ? '<button class="btn amarelo acao" data-acao="irAdmin">Painel do admin</button>' : ''}
       <button class="btn fantasma acao" data-acao="irColecao">Coleção</button>
@@ -1021,8 +1103,9 @@ function telaMapa() {
       <p class="manha ${info.chefao ? 'chefe' : ''}"><b>${info.chefao ? 'Regra do Chefão' : 'Manha'}:</b> ${esc(p.regra)}</p>
       <p>Recompensa: ${E.recompensaMesa[tipo]} réis + 1 por mão que sobrar${extra}</p>
       ${info.chefao ? `<p class="drop"><i class="tampa" aria-hidden="true"></i>Deixa cair <b>${tampas} Tampinhas</b></p>` : ''}
+      ${atual && r.avisos?.length ? `<ul class="avisos-mesa">${r.avisos.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}
       ${atual ? `<div class="botoes" style="margin-top:auto">
-        <button class="btn truco acao" data-acao="sentar">Sentar com ${esc(p.nome)}</button>
+        <button class="btn truco acao" data-acao="sentar" ${j.evento ? 'disabled title="Resolva o evento primeiro"' : ''}>Sentar com ${esc(p.nome)}</button>
         ${r.promessa ? `<button class="btn acao" data-acao="pularMesa" title="Pular esta Mesa">Pular: ${esc(r.promessa.descricao)}</button>` : ''}
       </div>` : ''}
     </div>`;
@@ -1032,9 +1115,58 @@ function telaMapa() {
       ${bairrosHTML(r)}
       <div class="num" style="color:var(--lampada);font-size:1.4rem">${r.reis} réis</div>
     </div>
+    ${r.desafio ? `<p class="faixa-desafio">Desafio do dia ${esc(r.desafio)}${app.perfil.desafios[r.desafio] ? ' · treino (só a 1ª tentativa vale)' : ' · valendo para o ranking'}</p>` : ''}
+    ${r.divida ? `<p class="faixa-divida">📒 Você deve ${r.divida} réis ao dono do bar. Ele cobra no fim da próxima Mesa.</p>` : ''}
+    ${eventoHTML(j)}
     <div class="mesas">${cards}</div>
     ${painelColecaoRun(j, false)}
     <div class="botoes" style="margin-top:18px"><button class="btn fantasma peq acao" data-acao="modal" data-arg="sair">Sair da run</button></div>`;
+}
+
+function eventoHTML(j) {
+  const ev = j.evento;
+  if (!ev) return '';
+  const r = j.run;
+  const ops = ev.opcoes.map((op, i) => {
+    const custo = j.custoOpcao(op);
+    return `<button class="btn ${i === 0 ? 'amarelo' : 'fantasma'} acao" data-acao="evento" data-arg="${i}" ${custo > r.reis ? 'disabled' : ''}>
+      <span>${esc(op.rotulo)}</span><small>${esc(op.resumo)}</small></button>`;
+  }).join('');
+  return `<section class="evento ${ev.especial ? 'especial' : ''}" aria-label="Evento do bairro">
+    <div class="evento-icone" aria-hidden="true">${ev.icone}</div>
+    <div class="evento-corpo">
+      <span class="rotulo">${ev.especial ? 'Mesa especial' : 'Evento do bairro'}</span>
+      <h3>${esc(ev.nome)}</h3>
+      <p>${esc(ev.texto)}</p>
+      <div class="evento-opcoes">${ops}</div>
+    </div>
+  </section>`;
+}
+
+// Roleta da Rodada da Sorte: gira e para na fatia sorteada
+function girarRoleta(fatias, indice) {
+  return new Promise((fim) => {
+    const n = fatias.length;
+    const cores = ['#b3261e', '#2b5a7a', '#d9a536', '#2f6b3a', '#5c4a8a', '#8a5a2b', '#1f7a7a'];
+    const grad = fatias.map((f, i) => `${cores[i % cores.length]} ${(i / n) * 360}deg ${((i + 1) / n) * 360}deg`).join(', ');
+    const rotulos = fatias.map((f, i) => `<span style="--a:${((i + 0.5) / n) * 360}deg">${esc(f.texto.replace(/[!.]+$/, ''))}</span>`).join('');
+    const el = document.createElement('div');
+    el.className = 'roleta-palco';
+    el.innerHTML = `<div class="roleta-seta" aria-hidden="true">▼</div><div class="roleta" style="background:conic-gradient(${grad})">${rotulos}</div><p class="roleta-texto" aria-live="polite"></p>`;
+    document.body.appendChild(el);
+    const roda = el.querySelector('.roleta');
+    const alvo = 360 * 6 + (360 - ((indice + 0.5) / n) * 360);
+    audio.tocar('embaralhar');
+    requestAnimationFrame(() => { roda.style.transform = `rotate(${alvo}deg)`; });
+    const tique = setInterval(() => audio.tocar('clique'), 160);
+    setTimeout(() => {
+      clearInterval(tique);
+      el.querySelector('.roleta-texto').textContent = fatias[indice].texto;
+      el.classList.add(fatias[indice].bom ? 'bom' : 'ruim');
+      audio.tocar(fatias[indice].bom ? 'vitoria' : 'derrota');
+      setTimeout(() => { el.remove(); fim(); }, 1600);
+    }, reduzido ? 100 : 4200);
+  });
 }
 
 function painelColecaoRun(j, loja) {
@@ -1126,7 +1258,12 @@ function viraVisivel(j) {
   return (rd.mao?.vazas.length ?? 0) >= ate;
 }
 
-function vazasHTML(rd, ctx, nomeAdv) {
+// Nomes dos lugares na dupla: 0 você, 1 e 3 adversários, 2 parceiro
+function nomeLugar(j, nomes) {
+  return j === 0 ? 'Você' : nomes?.[j] ?? (j === 2 ? 'Parceiro' : 'Adversário');
+}
+
+function vazasHTML(rd, ctx, nomeAdv, nomes = null) {
   const st = rd.mao;
   const n = rd.numVazas;
   const slots = [];
@@ -1135,22 +1272,45 @@ function vazasHTML(rd, ctx, nomeAdv) {
     if (v) {
       const res = v.vencedor === 0 ? '<span class="res v">Sua</span>' : v.vencedor === 1 ? '<span class="res p">Dele</span>' : '<span class="res e">Cangou</span>';
       const pts = rd.vazasPontuadas.find((x) => x.indice === i);
-      slots.push(`<div class="vaza">
-        <div class="par">${cartaHTML(v.cartas[1], { ctx, mini: true, estatica: true })}${cartaHTML(v.cartas[0], { ctx, mini: true, estatica: true })}</div>
+      const ordem = v.cartas.length > 2 ? [1, 3, 2, 0] : [1, 0];
+      slots.push(`<div class="vaza ${v.cartas.length > 2 ? 'quatro' : ''}">
+        <div class="par">${ordem.map((k) => cartaHTML(v.cartas[k], { ctx, mini: true, estatica: true })).join('')}</div>
         ${res}${pts ? `<span class="pts">${fmt(pts.total)}</span>` : ''}
       </div>`);
     } else if (st && !st.fim && i === st.vazas.length) {
-      const dele = st.mesa.find((x) => x.jogador === 1);
-      const minha = st.mesa.find((x) => x.jogador === 0);
-      const quem = st.pedido ? 'Truco na mesa' : st.vez === 0 ? 'Sua vez' : `Vez de ${nomeAdv}`;
-      slots.push(`<div class="vaza atual">
-        <div class="par">${dele ? cartaHTML(dele.carta, { ctx, mini: true, estatica: true, entra: true }) : '<div class="carta mini verso" style="opacity:.15"></div>'}${minha ? cartaHTML(minha.carta, { ctx, mini: true, estatica: true, entra: true }) : '<div class="carta mini verso" style="opacity:.15"></div>'}</div>
+      const quatro = st.maos.length > 2;
+      const ordem = quatro ? [1, 3, 2, 0] : [1, 0];
+      const vazio = '<div class="carta mini verso" style="opacity:.15"></div>';
+      const quem = st.pedido ? 'Truco na mesa' : st.vez === 0 ? 'Sua vez' : `Vez de ${quatro ? nomeLugar(st.vez, nomes) : nomeAdv}`;
+      slots.push(`<div class="vaza atual ${quatro ? 'quatro' : ''}">
+        <div class="par">${ordem.map((k) => { const x = st.mesa.find((m) => m.jogador === k); return x ? cartaHTML(x.carta, { ctx, mini: true, estatica: true, entra: true }) : vazio; }).join('')}</div>
         <span class="quem-joga">${quem}</span></div>`);
     } else {
       slots.push(`<div class="vaza"><span class="quem-joga" style="margin:auto">${i + 1}ª rodada</span></div>`);
     }
   }
   return `<div class="vazas" style="--n:${n}">${slots.join('')}</div>`;
+}
+
+// Os outros três da mesa em dupla, com cartas na mão e o sinal que você viu
+function lugaresDupla({ st, nomes, avatares, sinais, vistos, maos }) {
+  const vez = st && !st.fim ? (st.pedido ? null : st.vez) : null;
+  const lugar = (k) => {
+    const n = (st ? st.maos[k] : maos[k])?.length ?? 0;
+    const sinal = sinais?.[k] && (k === 2 || vistos?.includes(k)) ? SINAIS[sinais[k]] : null;
+    const papel = k === 2 ? 'Seu parceiro' : 'Adversário';
+    return `<div class="lugar ${k === 2 ? 'parceiro' : 'contra'} ${vez === k ? 'vez' : ''}">
+      <span class="avatar" aria-hidden="true">${esc(avatares[k])}</span>
+      <div><span class="rotulo">${papel}</span><b>${esc(nomes[k])}</b></div>
+      <div class="cartas-lugar">${Array.from({ length: n }, () => versoHTML({ mini: true })).join('')}</div>
+      ${sinal ? `<div class="sinal ${k === 2 ? '' : 'pego'}" title="${esc(sinal.nome)}">${sinal.emoji} <span>${k === 2 ? '' : 'Você pegou: '}${esc(sinal.gesto)} (${esc(sinal.nome)})</span></div>` : ''}
+    </div>`;
+  };
+  return `<div class="lugares">${lugar(1)}${lugar(2)}${lugar(3)}</div>`;
+}
+
+function botoesSinal(meu) {
+  return `<div class="sinais-meus"><span class="rotulo">Seu sinal pro parceiro:</span>${Object.entries(SINAIS).map(([k, s]) => `<button class="btn peq ${meu === k ? 'amarelo' : 'fantasma'} acao" data-acao="sinalizar" data-arg="${k}" title="${esc(s.gesto)}: ${esc(s.nome)}">${s.emoji} ${esc(s.nome)}</button>`).join('')}</div>`;
 }
 
 function acoesMesa(j) {
@@ -1174,7 +1334,8 @@ function acoesMesa(j) {
   } else if (rd.fase === 'jogo') {
     if (st.pedido && st.pedido.por === 1) {
       const prox = proximoValor(st.pedido.valor, st.valores);
-      dica = `${nome} pediu ${st.pedido.valor}. Aceitar, aumentar ou correr?`;
+      const quemPediu = st.jogadores === 4 ? nomeLugar(st.pedido.jogador, nomesDupla(j)) : nome;
+      dica = `${quemPediu} pediu ${st.pedido.valor}. Aceitar, aumentar ou correr?`;
       botoes.push(`<button class="btn amarelo acao" data-acao="responder" data-arg="aceitar">Aceitar (${st.pedido.valor})</button>`);
       if (prox) botoes.push(`<button class="btn truco acao" data-acao="responder" data-arg="aumentar">${NOME_VALOR[prox]}</button>`);
       botoes.push(`<button class="btn fantasma acao" data-acao="responder" data-arg="correr">Correr</button>`);
@@ -1185,11 +1346,17 @@ function acoesMesa(j) {
       botoes.push(`<button class="btn amarelo acao" data-acao="jogar" ${n === 1 ? '' : 'disabled'}>Jogar carta</button>`);
       if (j.podePedirTruco()) botoes.push(`<button class="btn truco acao" data-acao="truco">${NOME_VALOR[proximoValor(st.valor, st.valores)]}</button>`);
     } else {
-      dica = `${nome} está pensando`;
+      dica = `${st.jogadores === 4 ? nomeLugar(st.pedido ? null : st.vez, nomesDupla(j)) : nome} está pensando`;
     }
   }
   if (benz) botoes.push('<button class="btn fantasma acao" data-acao="benzer">Benzer (revelar cartas)</button>');
   return { botoes: botoes.join(''), dica };
+}
+
+function nomesDupla(j) {
+  const m = j.run.mesa;
+  const P = app.dados.personagensPorId;
+  return { 1: j.pessoa.nome, 2: P[m.parceiroId]?.nome, 3: P[m.adv2Id]?.nome };
 }
 
 function minhaVez(j) {
@@ -1233,7 +1400,8 @@ function overlayMesa(j) {
       <div class="linha-giz"><span>Recompensa da Mesa</span><span class="num">+${rm.base}</span></div>
       <div class="linha-giz"><span>Mãos que sobraram</span><span class="num">+${rm.porMao}</span></div>
       <div class="linha-giz"><span>Juros</span><span class="num">+${rm.juros}</span></div>
-      ${rm.extra ? `<div class="linha-giz"><span>Manha de ${esc(pessoa.nome)}</span><span class="num">+${rm.extra}</span></div>` : ''}
+      ${rm.extra ? `<div class="linha-giz"><span>Manha e eventos</span><span class="num">+${rm.extra}</span></div>` : ''}
+      ${rm.fiado ? `<div class="linha-giz"><span>📒 Fiado pago ao dono do bar</span><span class="num">−${rm.fiado.pago}</span></div>${rm.fiado.comparsa ? `<div class="regra-chefao">Faltou dinheiro: o dono do bar levou ${esc(app.dados.comparsasPorId[rm.fiado.comparsa].nome)}.</div>` : ''}` : ''}
       <div class="linha-giz"><span>Réis agora</span><span class="num" style="color:var(--lampada)">${r.reis}</span></div>
       ${rm.tampinhas ? `<div class="drop-grande"><i class="tampa" aria-hidden="true"></i>+${rm.tampinhas} Tampinhas<small>${esc(pessoa.nome)} deixou cair. Gaste no Bazar (menu).</small></div>` : ''}
       <div class="botoes"><button class="btn amarelo acao" data-acao="irBoteco">Ir ao Boteco</button></div>
@@ -1251,7 +1419,7 @@ function overlayMesa(j) {
   }
   if (rd?.fase !== 'fim' || !rd.resultado) return '';
   const res = rd.resultado;
-  const titulo = res.venceu ? 'A mão é sua!' : res.vencedor === null ? 'Ninguém levou' : `A mão foi de ${pessoa.nome}`;
+  const titulo = res.venceu ? (rd.maoParceiro ? 'A mão é de vocês!' : 'A mão é sua!') : res.vencedor === null ? 'Ninguém levou' : rd.maoParceiro ? 'A mão foi deles' : `A mão foi de ${pessoa.nome}`;
   const linhas = [];
   const fuga = rd.vazasPontuadas.find((v) => v.fuga);
   if (res.correu === 1) linhas.push(`<p>${esc(pessoa.nome)} correu do truco.${fuga ? ` Sua melhor carta (${esc(fuga.carta.rank)}) pontuou ${fmt(fuga.total)}.` : ''}</p>`);
@@ -1298,6 +1466,13 @@ function telaMesa() {
   const valor = st ? st.valor : valorInicial(j);
   const suaVez = minhaVez(j);
   const pensando = rd.fase === 'jogo' && !st.fim && (st.pedido ? st.pedido.por === 0 : st.vez === 1);
+  const emDupla = !!rd.maoParceiro;
+  const P = app.dados.personagensPorId;
+  const nomes = emDupla ? nomesDupla(j) : null;
+  const dupl = emDupla ? lugaresDupla({
+    st, nomes, avatares: { 1: pessoa.avatar, 2: P[m.parceiroId].avatar, 3: P[m.adv2Id].avatar },
+    sinais: rd.sinais, vistos: rd.sinaisVistos, maos: { 1: rd.maoAdv, 2: rd.maoParceiro, 3: rd.maoAdv2 },
+  }) : '';
   const temItens = r.comparsas.length || r.consumiveis.length;
 
   return `<div class="mesa-layout">
@@ -1311,9 +1486,10 @@ function telaMesa() {
           <div class="cartas-adv">${adv}</div>
           <div class="vira-box"><span class="rotulo">Vira</span>${vira}</div>
         </div>
-        ${vazasHTML(rd, ctx, pessoa.nome)}
+        ${dupl}
+        ${vazasHTML(rd, ctx, pessoa.nome, nomes)}
         <div class="valendo">
-          <span class="rotulo" style="color:var(--papel)">Mão ${m.maoIdx + 1}${rd.onze ? ' · mão de onze' : ''}</span>
+          <span class="rotulo" style="color:var(--papel)">${emDupla ? 'Mesa Dupla · ' : ''}Mão ${m.maoIdx + 1}${rd.onze ? ' · mão de onze' : ''}</span>
           ${placarRodadas(rd)}
           <span class="rotulo" style="color:var(--papel)">valendo</span><span class="num">${valor}</span>
         </div>
@@ -1324,6 +1500,7 @@ function telaMesa() {
         <div class="mao">${mao}</div>
         <div class="dica">${esc(dica)}</div>
         <div class="botoes">${botoes}</div>
+        ${emDupla && rd.sinais && (rd.fase === 'troca' || rd.fase === 'vira') ? botoesSinal(rd.sinais[0]) : ''}
       </section>
     </div>
   </div>${overlayMesa(j)}`;
@@ -1384,8 +1561,17 @@ function telaFim() {
     ['Tampinhas ganhas', s.tampinhas ?? 0],
     ['Baralho', app.dados.baralhosPorId[r.baralhoId].nome],
   ].map(([k, v]) => `<div class="linha-giz"><span>${k}</span><span class="num">${esc(v)}</span></div>`).join('');
+  const d = r.desafioResultado;
+  const blocoDesafio = d ? `<div class="lousa resultado-desafio">
+      <span class="rotulo">Desafio do dia ${esc(d.dia)}</span>
+      <div class="grande">${fmt(d.pontos)}</div>
+      <p>${d.valeu ? (d.posicao ? `Você está em <b>${d.posicao}º</b> no ranking de hoje!` : d.erro ? `Não deu para enviar ao ranking: ${esc(d.erro)}` : 'Resultado enviado.') : 'Treino: só a primeira tentativa do dia vale para o ranking.'}</p>
+      ${d.tampinhas ? `<div class="drop-grande"><i class="tampa" aria-hidden="true"></i>+${d.tampinhas} Tampinhas por jogar o desafio</div>` : ''}
+      <button class="btn amarelo acao" data-acao="irDesafio">Ver ranking</button>
+    </div>` : '';
   return `<section class="menu" style="padding-top:2vh">
     <h1 class="logo">${venceu ? 'REI DO TRUCO' : 'FIM DA RUN'}</h1>
+    ${blocoDesafio}
     <div class="lousa" style="width:min(100%,480px);text-align:left">
       ${linhas}
       <div class="linha-giz"><span>Seed</span><span class="num" style="color:var(--lampada);user-select:all">${esc(r.seed)}</span></div>
@@ -1467,6 +1653,106 @@ function telaClassico() {
         <div class="mao">${minhas}</div><div class="dica">${esc(dica)}</div><div class="botoes">${botoes.join('')}</div></section>
     </div>
   </div>${overlay}`;
+}
+
+// ---------- truco em dupla ----------
+
+function telaDupla() {
+  const p = app.partida;
+  const st = p.mao;
+  const ctx = { vira: st.vira };
+  const P = app.dados.personagensPorId;
+  const nomes = { 1: P[p.pessoas[1]].nome, 2: P[p.pessoas[2]].nome, 3: P[p.pessoas[3]].nome };
+  const avatares = { 1: P[p.pessoas[1]].avatar, 2: P[p.pessoas[2]].avatar, 3: P[p.pessoas[3]].avatar };
+  const minhas = st.maos[0].map((c) => (p.ferro && !st.fim ? versoHTML({ acao: 'carta', arg: c.id }) : cartaHTML(c, { ctx, sel: app.sel.includes(c.id) }))).join('');
+  const rd = { mao: st, numVazas: 3, vazasPontuadas: [] };
+  const botoes = [];
+  let dica = '';
+  let overlay = '';
+  if (p.fase === 'jogo') {
+    if (st.pedido && st.pedido.por === 1) {
+      const prox = proximoValor(st.pedido.valor);
+      dica = `${nomes[st.pedido.jogador]} pediu ${st.pedido.valor}. Você responde pela dupla.`;
+      botoes.push(`<button class="btn amarelo acao" data-acao="responder" data-arg="aceitar">Aceitar (${st.pedido.valor})</button>`);
+      if (prox) botoes.push(`<button class="btn truco acao" data-acao="responder" data-arg="aumentar">${NOME_VALOR[prox]}</button>`);
+      botoes.push('<button class="btn fantasma acao" data-acao="responder" data-arg="correr">Correr</button>');
+    } else if (st.vez === 0 && !st.pedido) {
+      dica = p.onze ? 'Mão de onze: vale 3, sem truco.' : p.ferro ? 'Mão de ferro: todo mundo joga às cegas.' : 'Sua vez. Toque numa carta e de novo para jogar.';
+      botoes.push(`<button class="btn amarelo acao" data-acao="jogar" ${app.sel.length === 1 ? '' : 'disabled'}>Jogar carta</button>`);
+      if (st.trucoPermitido && st.ultimoAumento !== 0 && proximoValor(st.valor)) botoes.push(`<button class="btn truco acao" data-acao="truco">${NOME_VALOR[proximoValor(st.valor)]}</button>`);
+    } else dica = `${st.pedido ? nomes[1] : nomeLugar(st.vez, nomes)} está pensando...`;
+  } else if (!app.animando) {
+    const res = p.ultimoResultado;
+    const fim = p.fase === 'fim';
+    const titulo = fim ? (p.vencedor === 0 ? 'Partida de vocês!' : 'Partida deles') : res.vencedor === 0 ? 'A mão é de vocês' : res.vencedor === null ? 'Ninguém levou' : 'A mão foi deles';
+    overlay = `<div class="sobreposto" role="dialog" aria-modal="true"><div class="lousa resultado">
+      <h2>${esc(titulo)}</h2>
+      ${res.vencedor !== null ? `<div class="grande">+${res.pontos}</div>` : ''}
+      ${res.correu === 1 ? '<p>Eles correram.</p>' : res.correu === 0 ? '<p>Vocês correram.</p>' : ''}
+      <div class="linha-giz"><span>Nós (você e ${esc(nomes[2])})</span><span class="num">${p.placar[0]}</span></div>
+      <div class="linha-giz"><span>Eles (${esc(nomes[1])} e ${esc(nomes[3])})</span><span class="num">${p.placar[1]}</span></div>
+      <div class="botoes">${fim ? '<button class="btn truco acao" data-acao="trucoDupla">Nova partida</button><button class="btn fantasma acao" data-acao="irMenu">Menu</button>' : '<button class="btn amarelo acao" data-acao="proximaMaoClassico">Próxima mão</button>'}</div>
+    </div></div>`;
+  }
+  const podeSinal = p.fase === 'jogo' && !st.vazas.length;
+  return `<div class="mesa-layout">
+    <aside class="lousa">
+      <div class="rotulo">Truco em dupla · até ${p.pontosVitoria}</div>
+      <h2>Nós ${p.placar[0]} × ${p.placar[1]} Eles</h2>
+      <div class="linha-giz"><span class="rotulo">Mão</span><span class="num">${p.maoNumero}</span></div>
+      <div class="linha-giz"><span class="rotulo">Valendo</span><span class="num" style="color:var(--lampada)">${st.valor}</span></div>
+      <div class="linha-giz"><span class="rotulo">Quem abre</span><span>${nomeLugar(p.pe, nomes)}</span></div>
+      ${p.ferro ? '<div class="regra-chefao">Mão de ferro: cartas às cegas</div>' : ''}
+      <details class="ajuda-sinais"><summary>Sinais do truco</summary>${Object.values(SINAIS).map((s) => `<div>${s.emoji} ${esc(s.gesto)}: <b>${esc(s.nome)}</b></div>`).join('')}
+        <p>Seu parceiro sempre te mostra o sinal. Às vezes você pega o sinal de um adversário.</p></details>
+      <div class="botoes" style="margin-top:12px"><button class="btn fantasma peq acao" data-acao="irMenu">Sair</button></div>
+    </aside>
+    <div class="mesa-centro">
+      <section class="toalha">
+        <div class="adversario"><div class="vira-box"><span class="rotulo">Vira</span>${cartaHTML(st.vira, { mini: true, estatica: true })}</div>
+          ${app.falaClassico ? `<div class="fala">${esc(app.falaClassico)}</div>` : ''}</div>
+        ${lugaresDupla({ st, nomes, avatares, sinais: p.sinais, vistos: p.sinaisVistos })}
+        ${vazasHTML(rd, ctx, nomes[1], nomes)}
+        <div class="valendo">${placarRodadas(rd)}<span class="rotulo" style="color:var(--papel)">valendo</span><span class="num">${st.valor}</span></div>
+      </section>
+      <section class="mao-area ${p.fase === 'jogo' && (st.pedido ? st.pedido.por === 1 : st.vez === 0) && !app.animando ? 'sua-vez' : ''}">
+        ${app.falaJogador ? `<div class="fala jogador">${esc(app.falaJogador)}</div>` : ''}
+        <div class="mao">${minhas}</div><div class="dica">${esc(dica)}</div><div class="botoes">${botoes.join('')}</div>
+        ${podeSinal ? botoesSinal(p.sinais[0]) : ''}
+      </section>
+    </div>
+  </div>${overlay}`;
+}
+
+// ---------- desafio do dia ----------
+
+function telaDesafio() {
+  const dia = diaDeHoje();
+  const meu = app.perfil.desafios[dia];
+  const rk = app.ranking;
+  const global = app.usuario.conta.desafio?.global;
+  let lista;
+  if (!rk?.linhas) lista = '<p class="rotulo">Carregando ranking...</p>';
+  else if (!rk.linhas.length) lista = `<p class="rotulo">${rk.erro ? `Não deu para carregar: ${esc(rk.erro)}` : 'Ninguém jogou ainda hoje. Seja o primeiro!'}</p>`;
+  else lista = `<ol class="ranking">${rk.linhas.map((l, i) => `<li class="${l.eu ? 'eu' : ''}"><span class="pos">${i + 1}º</span><span class="nome">${esc(l.nome)}</span><span class="info">Bairro ${l.bairro} · ${l.mesas} Mesas</span><b class="num">${fmt(l.pontos)}</b></li>`).join('')}</ol>`;
+  return `<div class="topo"><div><div class="rotulo">Todo mundo joga a mesma run hoje</div><h2>Desafio do dia</h2></div><button class="btn fantasma acao" data-acao="irMenu">Voltar</button></div>
+    <div class="dupla">
+      <div class="lousa">
+        <div class="linha-giz"><span class="rotulo">Dia</span><span class="num">${esc(dia.split('-').reverse().join('/'))}</span></div>
+        <div class="linha-giz"><span class="rotulo">Seed</span><span class="num">${esc(sementeDoDia(dia))}</span></div>
+        <div class="linha-giz"><span class="rotulo">Baralho</span><span>${esc(app.dados.baralhosPorId[BARALHO_DESAFIO].nome)}</span></div>
+        <p>Mesmas cartas, mesmos adversários e mesmos eventos para todo mundo. Pontuação: <b>1.000 por Mesa vencida</b> + todos os pontos que você fizer.</p>
+        <p>Só a <b>primeira tentativa do dia</b> vale para o ranking e dá <b>+${TAMPINHAS_DESAFIO} Tampinhas</b>. Depois disso, é treino.</p>
+        ${meu ? `<div class="drop-grande">Sua marca hoje: ${fmt(meu.pontos)}<small>Bairro ${meu.bairro} · ${meu.mesas} Mesas</small></div>` : ''}
+        <div class="botoes"><button class="btn truco acao" data-acao="jogarDesafio">${meu ? 'Treinar o desafio' : 'Jogar o desafio'}</button></div>
+      </div>
+      <div class="lousa">
+        <h3>Ranking de hoje</h3>
+        ${global ? '' : '<p class="rotulo">Sem conta online: aqui só aparece o seu resultado. Entre com uma conta para disputar com os outros.</p>'}
+        ${lista}
+        <div class="botoes"><button class="btn fantasma peq acao" data-acao="irDesafio">Atualizar</button></div>
+      </div>
+    </div>`;
 }
 
 // ---------- explicações ("i") ----------

@@ -17,6 +17,7 @@ function comPessoa(id, seed = `P-${id}`) {
   jogo.run.rivais = Array(8).fill({ bar: p.tipo === 'bar' ? id : 'seu_joaquim', fundo: p.tipo === 'fundo' ? id : 'rita_navalha' });
   if (p.tipo === 'fundo') jogo.run.mesaIdx = 1;
   jogo.prepararMapa();
+  jogo.run.evento = null;
   return jogo;
 }
 

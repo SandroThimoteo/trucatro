@@ -876,3 +876,87 @@ body[style*="--cenario"]::before { opacity: 1; }
 .cena.final .cena-nome { color: var(--lampada); text-shadow: 0 4px 0 #7a5a12, 0 0 40px rgba(242, 193, 78, 0.8); }
 .cena.final .cena-chefe { animation: cena-chefe 1.1s cubic-bezier(.2, 1.3, .4, 1) 0.5s both, respira 3.5s ease-in-out 1.6s infinite, treme 0.32s linear 1.1s 3; }
 @media (prefers-reduced-motion: reduce) { .cena *, .cena { animation: none !important; } }
+
+/* ---------- eventos do bairro ---------- */
+.evento {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: start; margin-bottom: 16px;
+  padding: 16px 18px; border-radius: 14px; background: var(--papel); color: var(--tinta);
+  box-shadow: 0 0 0 3px var(--lampada), 0 12px 30px rgba(0, 0, 0, 0.45); animation: evento-entra 0.5s cubic-bezier(.2, 1.4, .4, 1);
+}
+.evento.especial { background: linear-gradient(150deg, #fff3c4, var(--papel) 60%); box-shadow: 0 0 0 3px var(--truco, #b3261e), 0 0 30px rgba(242, 193, 78, 0.45), 0 12px 30px rgba(0, 0, 0, 0.45); }
+@keyframes evento-entra { from { transform: translateY(-20px) rotate(-2deg) scale(0.9); opacity: 0; } }
+.evento-icone { font-size: clamp(2.6rem, 9vw, 4rem); line-height: 1; animation: respira 2.6s ease-in-out infinite; }
+.evento .rotulo { color: #7a5a12; }
+.evento h3 { font-size: 1.5rem; margin: 2px 0 6px; }
+.evento p { margin: 0 0 10px; }
+.evento-opcoes { display: flex; flex-wrap: wrap; gap: 10px; }
+.evento-opcoes .btn { flex-direction: column; align-items: flex-start; text-align: left; gap: 2px; max-width: 340px; }
+.evento-opcoes .btn small { font-family: var(--corpo); font-size: 0.78rem; font-weight: 400; opacity: 0.85; }
+.evento-opcoes .btn.fantasma { color: var(--tinta); box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.25); }
+.avisos-mesa { margin: 0; padding: 8px 10px 8px 26px; border-radius: 8px; background: rgba(242, 193, 78, 0.18); font-size: 0.88rem; }
+.faixa-desafio, .faixa-divida { text-align: center; margin: 0 0 12px; padding: 8px 14px; border-radius: 99px; font-family: var(--giz-fonte); }
+.faixa-desafio { background: rgba(242, 193, 78, 0.16); color: var(--lampada); }
+.faixa-divida { background: rgba(179, 38, 30, 0.25); color: #ffd7d2; }
+
+/* Roleta */
+.roleta-palco { position: fixed; inset: 0; z-index: 35; display: grid; place-items: center; align-content: center; gap: 14px; background: rgba(6, 10, 9, 0.85); animation: palco-entra 0.25s ease-out; }
+.roleta {
+  --r: min(78vw, 360px); width: var(--r); height: var(--r); border-radius: 50%; position: relative;
+  box-shadow: 0 0 0 8px #3a2a14, 0 0 0 12px var(--lampada), 0 20px 50px rgba(0, 0, 0, 0.6);
+  transition: transform 4s cubic-bezier(.12, .7, .1, 1);
+}
+.roleta::after { content: ''; position: absolute; inset: 42%; border-radius: 50%; background: radial-gradient(circle, #fff6d5, var(--lampada)); box-shadow: 0 0 0 4px #3a2a14; }
+.roleta span {
+  position: absolute; left: 50%; top: 50%; width: 46%; transform-origin: 0 50%; transform: rotate(calc(var(--a) - 90deg));
+  padding-left: 22%; font-family: var(--corpo); font-weight: 700; font-size: clamp(0.6rem, 2.4vw, 0.8rem); color: #fff; text-shadow: 0 1px 2px #000; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.roleta-seta { font-size: 2.4rem; color: var(--lampada); margin-bottom: -26px; z-index: 1; text-shadow: 0 3px 6px #000; }
+.roleta-texto { font-family: var(--display); font-size: clamp(1.6rem, 6vw, 2.4rem); min-height: 1.3em; margin: 0; color: var(--giz); }
+.roleta-palco.bom .roleta-texto { color: var(--lampada); animation: carimbo-total 0.4s ease-out; }
+.roleta-palco.ruim .roleta-texto { color: #ff8c7a; animation: treme 0.32s linear; }
+
+/* ---------- mesa em dupla ---------- */
+.lugares { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
+.lugar {
+  position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; align-items: center;
+  padding: 8px; border-radius: 10px; background: rgba(0, 0, 0, 0.28); color: var(--papel); min-width: 0;
+}
+.lugar.parceiro { box-shadow: inset 0 0 0 2px rgba(57, 255, 138, 0.45); }
+.lugar.contra { box-shadow: inset 0 0 0 2px rgba(255, 106, 80, 0.35); }
+.lugar.vez { box-shadow: inset 0 0 0 3px var(--lampada), 0 0 18px rgba(242, 193, 78, 0.5); }
+.lugar .avatar { font-size: 1.8rem; }
+.lugar b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lugar .rotulo { color: var(--papel); opacity: 0.8; font-size: 0.78rem; }
+.cartas-lugar { grid-column: 1 / -1; display: flex; gap: 3px; }
+.cartas-lugar .carta { --carta-w: 26px; border-radius: 4px; }
+.cartas-lugar .carta.verso::after { font-size: 0.7rem; }
+.sinal { grid-column: 1 / -1; font-size: 0.8rem; background: var(--papel); color: var(--tinta); border-radius: 8px; padding: 3px 8px; animation: pop 0.4s ease-out; }
+.sinal.pego { background: #ffd7d2; }
+.sinais-meus { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; align-items: center; margin-top: 10px; }
+.vaza.quatro .par { display: grid; grid-template-columns: repeat(2, auto); gap: 3px; justify-content: center; }
+.vaza.quatro .carta.mini { --carta-w: 38px; }
+.ajuda-sinais { margin-top: 10px; font-size: 0.88rem; }
+.ajuda-sinais summary { cursor: pointer; color: var(--lampada); font-family: var(--giz-fonte); }
+@media (max-width: 560px) {
+  .lugares { gap: 4px; }
+  .lugar { padding: 6px; grid-template-columns: minmax(0, 1fr); text-align: center; justify-items: center; }
+  .lugar .avatar { font-size: 1.4rem; }
+  .lugar .rotulo { display: none; }
+  .cartas-lugar { justify-content: center; }
+  .sinal span { display: none; }
+  .evento { grid-template-columns: minmax(0, 1fr); text-align: center; }
+  .evento-opcoes { justify-content: center; }
+}
+
+/* ---------- desafio do dia ---------- */
+.ranking { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 4px; }
+.ranking li { display: grid; grid-template-columns: 2.6em minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; padding: 6px 10px; border-radius: 8px; background: rgba(255, 255, 255, 0.05); }
+.ranking li:nth-child(1) .pos { color: #ffd34d; }
+.ranking li:nth-child(2) .pos { color: #d7dde3; }
+.ranking li:nth-child(3) .pos { color: #e09a5b; }
+.ranking li.eu { background: rgba(242, 193, 78, 0.18); box-shadow: inset 0 0 0 2px var(--lampada); }
+.ranking .pos { font-family: var(--display); grid-row: span 2; }
+.ranking .nome { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ranking .info { grid-column: 2; font-size: 0.8rem; color: var(--giz-fraco); }
+.ranking .num { grid-row: 1 / span 2; grid-column: 3; color: var(--lampada); font-size: 1.2rem; }
+.resultado-desafio { width: min(100%, 480px); text-align: center; display: grid; gap: 8px; justify-items: center; }

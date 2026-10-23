@@ -25,6 +25,10 @@ export function jogarRunComBot(dados, seed, { maxPassos = 5000, baralhoId = 'bot
   while (passos++ < maxPassos) {
     if (r.fase === 'derrota' || r.fase === 'vitoria') break;
     if (r.fase === 'mapa') {
+      if (jogo.evento) {
+        const ops = jogo.evento.opcoes.map((op, i) => i).filter((i) => jogo.custoOpcao(jogo.evento.opcoes[i]) <= r.reis);
+        jogo.resolverEvento(bot.pick(ops));
+      }
       jogo.iniciarMesa();
     } else if (r.fase === 'mesa') {
       const rd = jogo.rodada;

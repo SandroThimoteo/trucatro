@@ -67,3 +67,16 @@ ok((await rpc('trucatro_cadastrar', { p_nome: 'ab', p_senha: 'senha123', p_convi
 ok((await rpc('trucatro_cadastrar', { p_nome: 'Carlos', p_senha: '123', p_convite: cods[2] })).erro?.includes('Senha'), 'senha curta recusada');
 for (let i = 0; i < 8; i++) await rpc('trucatro_entrar', { p_nome: 'Sandro', p_senha: 'x' });
 ok((await rpc('trucatro_entrar', { p_nome: 'Sandro', p_senha: 'segredo1' })).erro?.includes('Muitas'), 'limite de tentativas de login');
+
+// Desafio do dia
+const hoje = (await db.query(`select (now() at time zone 'America/Sao_Paulo')::date::text as d`)).rows[0].d;
+let rk = await rpc('trucatro_desafio_enviar', { p_token: ze.token, p_dia: hoje, p_pontos: 5300, p_bairro: 3, p_mesas: 6 });
+ok(Array.isArray(rk) && rk[0].nome === 'Zéca' && rk[0].pontos === 5300, 'desafio: envia e aparece no ranking');
+rk = await rpc('trucatro_desafio_enviar', { p_token: ze.token, p_dia: hoje, p_pontos: 100, p_bairro: 1, p_mesas: 0 });
+ok(rk.length === 1 && rk[0].pontos === 5300, 'desafio: fica o melhor resultado do dia');
+const adm2 = await rpc('trucatro_entrar', { p_nome: 'Sandro', p_senha: 'segredo1' });
+void adm2;
+ok((await rpc('trucatro_desafio_enviar', { p_token: ze.token, p_dia: '2020-01-01', p_pontos: 10, p_bairro: 1, p_mesas: 0 })).erro?.includes('fechou'), 'desafio: dia antigo recusado');
+ok((await rpc('trucatro_desafio_enviar', { p_token: ze.token, p_dia: hoje, p_pontos: -5, p_bairro: 1, p_mesas: 0 })).erro?.includes('inválido'), 'desafio: pontuação negativa recusada');
+ok((await rpc('trucatro_desafio_enviar', { p_token: 'falso', p_dia: hoje, p_pontos: 10, p_bairro: 1, p_mesas: 0 })).erro, 'desafio: sem login não envia');
+ok(Array.isArray(await rpc('trucatro_desafio_ranking', { p_dia: hoje })), 'desafio: ranking público');

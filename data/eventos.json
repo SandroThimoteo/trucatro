@@ -1,0 +1,93 @@
+{
+  "chance": 0.55,
+  "eventos": [
+    {
+      "id": "faltou_luz", "nome": "Faltou luz!", "icone": "🕯️", "peso": 3,
+      "texto": "Caiu a energia no bairro inteiro. O dono acendeu umas velas e disse que o jogo continua.",
+      "opcoes": [
+        { "rotulo": "Jogar à luz de vela", "resumo": "Próxima Mesa: a vira fica escondida até a 2ª rodada. Recompensa ×1,5.", "efeito": { "mod": { "viraEscondidaAte": 2, "recompensaMult": 1.5 } } },
+        { "rotulo": "Esperar a luz voltar", "resumo": "Nada muda.", "efeito": {} }
+      ]
+    },
+    {
+      "id": "festa_firma", "nome": "Festa da firma", "icone": "🎉", "peso": 3,
+      "texto": "Uma firma inteira fechou o bar para a confraternização. Muita gente querendo apostar alto.",
+      "opcoes": [
+        { "rotulo": "Entrar na festa", "resumo": "Próxima Mesa: réis em dobro, mas a meta sobe 30%.", "efeito": { "mod": { "recompensaMult": 2, "metaMult": 1.3 } } },
+        { "rotulo": "Ficar no canto", "resumo": "Nada muda.", "efeito": {} }
+      ]
+    },
+    {
+      "id": "chuva", "nome": "Toró", "icone": "🌧️", "peso": 2,
+      "texto": "Desabou uma chuva e meio bar foi embora. Quem ficou está com pressa.",
+      "opcoes": [
+        { "rotulo": "Jogar rapidinho", "resumo": "Próxima Mesa: meta 25% menor, mas sem trocas de carta.", "efeito": { "mod": { "metaMult": 0.75, "semTrocas": true } } },
+        { "rotulo": "Esperar a chuva passar", "resumo": "Nada muda.", "efeito": {} }
+      ]
+    },
+    {
+      "id": "fiado", "nome": "Mesa do Fiado", "icone": "📒", "peso": 3, "especial": true,
+      "texto": "O dono do bar abre a caderneta: te empresta 8 réis agora, e cobra 12 quando você terminar a próxima Mesa. Se não tiver, ele leva um Comparsa seu.",
+      "opcoes": [
+        { "rotulo": "Pendura na conta", "resumo": "+8 réis agora · deve 12 depois da próxima Mesa.", "efeito": { "reis": 8, "divida": 12 } },
+        { "rotulo": "Fiado só amanhã", "resumo": "Nada muda.", "efeito": {} }
+      ]
+    },
+    {
+      "id": "roleta", "nome": "Rodada da Sorte", "icone": "🎡", "peso": 3, "especial": true,
+      "texto": "Tem uma roleta velha pregada na parede. Custa 3 réis para girar. Pode sair coisa boa... ou não.",
+      "opcoes": [
+        { "rotulo": "Girar a roleta (3 réis)", "resumo": "Sorteia um prêmio ou um azar.", "efeito": { "reis": -3, "roleta": true } },
+        { "rotulo": "Não sou de jogo de azar", "resumo": "Nada muda.", "efeito": {} }
+      ]
+    },
+    {
+      "id": "mesa_dupla", "nome": "Mesa Dupla", "icone": "🤝", "peso": 3, "especial": true,
+      "texto": "Um freguês se oferece para ser seu parceiro: a próxima Mesa vira truco em dupla, você e ele contra dois. Antes de cada mão vocês trocam sinais.",
+      "opcoes": [
+        { "rotulo": "Topar a dupla", "resumo": "Próxima Mesa em dupla 2x2 · meta +40% · +4 réis de recompensa.", "efeito": { "mod": { "dupla": true, "metaMult": 1.4, "recompensaExtra": 4 } } },
+        { "rotulo": "Prefiro jogar sozinho", "resumo": "Nada muda.", "efeito": {} }
+      ]
+    },
+    {
+      "id": "bilhete", "nome": "Vendedor de bilhete", "icone": "🎟️", "peso": 2,
+      "texto": "Um sujeito passa vendendo bilhete do jogo do bicho. Paga 4 réis, metade das vezes dá 12.",
+      "opcoes": [
+        { "rotulo": "Comprar um bilhete (4 réis)", "resumo": "50% de chance de ganhar 12 réis.", "efeito": { "reis": -4, "aposta": { "chance": 0.5, "premio": 12 } } },
+        { "rotulo": "Dispensar", "resumo": "Nada muda.", "efeito": {} }
+      ]
+    },
+    {
+      "id": "briga", "nome": "Briga no balcão", "icone": "🥊", "peso": 2,
+      "texto": "Dois bêbados começaram a se estranhar bem do lado da sua mesa.",
+      "opcoes": [
+        { "rotulo": "Pagar uma rodada pra acalmar (4 réis)", "resumo": "−4 réis, nada mais.", "efeito": { "reis": -4 } },
+        { "rotulo": "Deixar rolar", "resumo": "Próxima Mesa: 1 mão a menos.", "efeito": { "mod": { "maosDelta": -1 } } }
+      ]
+    },
+    {
+      "id": "cafezinho", "nome": "Cafezinho passado na hora", "icone": "☕", "peso": 2,
+      "texto": "A dona do bar trouxe um café forte. Você ficou esperto.",
+      "opcoes": [
+        { "rotulo": "Tomar o café", "resumo": "Próxima Mesa: +1 troca e +1 mão.", "efeito": { "mod": { "trocasDelta": 1, "maosDelta": 1 } } }
+      ]
+    },
+    {
+      "id": "olheiro", "nome": "O olheiro", "icone": "👀", "peso": 2,
+      "texto": "Um moleque oferece espiar as cartas do adversário por 5 réis.",
+      "opcoes": [
+        { "rotulo": "Pagar o moleque (5 réis)", "resumo": "Próxima Mesa: você vê 1 carta do adversário em cada mão.", "efeito": { "reis": -5, "mod": { "revelaCartas": 1 } } },
+        { "rotulo": "Isso é coisa de malandro", "resumo": "Nada muda.", "efeito": {} }
+      ]
+    }
+  ],
+  "roleta": [
+    { "id": "reis10", "texto": "+10 réis!", "bom": true, "peso": 3, "efeito": { "reis": 10 } },
+    { "id": "comparsa", "texto": "Um Comparsa comum de graça!", "bom": true, "peso": 2, "efeito": { "comparsa": "comum" } },
+    { "id": "simpatia", "texto": "Uma Simpatia de graça!", "bom": true, "peso": 2, "efeito": { "simpatia": true } },
+    { "id": "mao", "texto": "+1 mão na próxima Mesa!", "bom": true, "peso": 2, "efeito": { "mod": { "maosDelta": 1 } } },
+    { "id": "perde", "texto": "Perdeu 5 réis...", "bom": false, "peso": 2, "efeito": { "reis": -5 } },
+    { "id": "troca", "texto": "Sem trocas na próxima Mesa...", "bom": false, "peso": 1, "efeito": { "mod": { "semTrocas": true } } },
+    { "id": "meta", "texto": "Meta 20% maior na próxima Mesa...", "bom": false, "peso": 1, "efeito": { "mod": { "metaMult": 1.2 } } }
+  ]
+}
