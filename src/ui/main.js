@@ -12,6 +12,7 @@ import { novoPerfil, normalizarPerfil, comprarItem, equiparItem, itemEquipado, r
 import { esc, fmt, cartaHTML, versoHTML, slotComparsa, infoBtn, avatarHTML, NOME_RARIDADE, NOME_VALOR } from './componentes.js';
 import { audio } from './audio.js';
 import { palcoRodada, palcoMao } from './palco.js';
+import { cenaChefao, urlCenario } from './cena.js';
 import { detectarConta, entrar, convidado, backupLocal, lerBackupLocal } from './conta.js';
 
 const raiz = document.getElementById('app');
@@ -167,9 +168,15 @@ async function abrirConta(conta) {
 // Visual comprado no Bazar: classes no body que mudam variáveis de CSS.
 function aplicarVisual() {
   const b = document.body;
-  for (const c of [...b.classList]) if (/^(verso|frente|toalha|raio)-/.test(c)) b.classList.remove(c);
+  for (const c of [...b.classList]) if (/^(verso|frente|toalha|raio|forma|efeito)-/.test(c)) b.classList.remove(c);
+  b.style.removeProperty('--cenario');
   if (!app.perfil) return;
-  for (const cat of ['verso', 'frente', 'toalha', 'raio']) b.classList.add(itemEquipado(app.dados, app.perfil, cat).classe);
+  for (const cat of ['verso', 'frente', 'toalha', 'raio', 'forma', 'efeito']) {
+    const classe = itemEquipado(app.dados, app.perfil, cat)?.classe;
+    if (classe) b.classList.add(...classe.split(' '));
+  }
+  const cenario = itemEquipado(app.dados, app.perfil, 'cenario')?.imagem;
+  if (cenario) b.style.setProperty('--cenario', `url('${urlCenario(cenario)}')`);
   audio.musica(itemEquipado(app.dados, app.perfil, 'musica').musica);
 }
 
@@ -254,7 +261,11 @@ async function tocarFila() {
   while (app.fila.length) {
     const ev = app.fila.shift();
     const meu = ev.jogador === 0;
-    if (ev.tipo === 'OnFala') {
+    if (ev.tipo === 'OnMesaIniciada' && ev.chefao && app.jogo) {
+      const r = app.jogo.run;
+      const pessoa = app.dados.personagensPorId[ev.chefao];
+      await cenaChefao(pessoa, { bairro: r.bairro, nomeBairro: app.jogo.nomeBairro(), final: !!pessoa.final });
+    } else if (ev.tipo === 'OnFala') {
       audio.falar(ev.texto, vozDe(ev.pessoa));
     } else if (ev.tipo === 'OnMaoDistribuida') {
       audio.tocar('embaralhar');
@@ -868,11 +879,26 @@ function previewItem(item) {
   if (item.categoria === 'frente') return `<div class="${item.classe} preview">${cartaHTML({ id: 'p1', rank: 'A', suit: 'espadas' }, { estatica: true })}${cartaHTML({ id: 'p2', rank: '7', suit: 'copas' }, { estatica: true })}</div>`;
   if (item.categoria === 'toalha') return `<div class="${item.classe} preview"><div class="toalha amostra"></div></div>`;
   if (item.categoria === 'raio') return `<div class="${item.classe} preview raio-preview"><svg viewBox="0 0 200 110" aria-hidden="true"><polyline class="raio brilho" points="10,20 60,45 45,58 110,70 95,82 190,95"/><polyline class="raio nucleo" points="10,20 60,45 45,58 110,70 95,82 190,95"/></svg></div>`;
+  if (item.categoria === 'forma') return `<div class="preview raio-preview" data-forma="${esc(item.classe)}"><svg viewBox="0 0 200 110" aria-hidden="true">${formaPreview(item.classe)}</svg></div>`;
+  if (item.categoria === 'efeito') return `<div class="${item.classe} preview efeito-preview"><div class="palco-carta">${cartaHTML({ id: 'p3', rank: '3', suit: 'paus' }, { estatica: true })}</div></div>`;
+  if (item.categoria === 'cenario') return item.imagem ? `<div class="preview cenario-preview" style="background-image:url('${urlCenario(item.imagem)}')"></div>` : '<div class="preview"><p class="citacao">Só o xadrez do boteco</p></div>';
   if (item.categoria === 'musica') return `<div class="preview"><span class="nota-musical" aria-hidden="true">♪♫</span><p class="citacao">${esc(item.nome)}</p></div>`;
   if (item.categoria === 'avatar') return `<div class="preview"><span class="avatar-grande" aria-hidden="true">${esc(item.avatar)}</span></div>`;
   if (item.categoria === 'titulo') return `<div class="preview"><span class="faixa-titulo">${esc(item.nome)}</span></div>`;
   if (item.categoria === 'falaTruco') return `<div class="preview"><span class="carimbo-mini">${esc(item.carimbo)}</span><p class="citacao">“${esc(item.falas.pedir[0])}”</p></div>`;
   return `<div class="preview"><p class="citacao">${item.falas.map((f) => `“${esc(f)}”`).join('<br>')}</p></div>`;
+}
+
+// Desenho fixo de cada forma de raio para a prévia do Bazar
+function formaPreview(classe) {
+  const linha = (pts, extra = '') => `<polyline class="raio brilho ${extra}" points="${pts}"/><polyline class="raio nucleo ${extra}" points="${pts}"/>`;
+  if (classe === 'forma-galho') return linha('10,20 60,45 45,58 110,70 95,82 190,95') + linha('60,45 80,20 95,25', 'fino') + linha('110,70 130,40 150,45', 'fino') + linha('45,58 30,90', 'fino');
+  if (classe === 'forma-duplo') return linha('10,15 60,40 45,55 110,62 95,80 190,95') + linha('10,35 55,60 70,48 120,85 140,75 190,95');
+  if (classe === 'forma-corrente') {
+    const pts = Array.from({ length: 41 }, (_, i) => { const x = 10 + i * 4.5; const y = 20 + i * 1.9 + Math.sin(i / 40 * Math.PI * 4) * 16 * Math.sin(i / 40 * Math.PI); return `${x.toFixed(1)},${y.toFixed(1)}`; }).join(' ');
+    return linha(pts);
+  }
+  return linha('10,20 60,45 45,58 110,70 95,82 190,95');
 }
 
 function telaBazar() {
@@ -1621,3 +1647,16 @@ Promise.all([carregarDados(), detectarConta()])
     console.error(e);
     raiz.innerHTML = `<p class="toast" style="position:static;transform:none">${esc(e.message)}</p>`;
   });
+
+// Carta da mão inclina e brilha seguindo o mouse
+raiz.addEventListener('pointermove', (e) => {
+  const c = e.target.closest?.('.mao .carta');
+  if (!c || e.pointerType !== 'mouse') return;
+  const r = c.getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width;
+  const y = (e.clientY - r.top) / r.height;
+  c.style.setProperty('--mx', `${(x * 100).toFixed(0)}%`);
+  c.style.setProperty('--my', `${(y * 100).toFixed(0)}%`);
+  c.style.setProperty('--ry', `${((x - 0.5) * 18).toFixed(1)}deg`);
+  c.style.setProperty('--rx', `${((0.5 - y) * 18).toFixed(1)}deg`);
+});

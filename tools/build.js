@@ -13,6 +13,7 @@ await rm(saida, { recursive: true, force: true });
 await mkdir(saida, { recursive: true });
 await cp(join(raiz, 'data'), join(saida, 'data'), { recursive: true });
 await cp(join(raiz, 'src'), join(saida, 'src'), { recursive: true });
+await cp(join(raiz, 'assets'), join(saida, 'assets'), { recursive: true });
 await writeFile(join(saida, 'index.html'), `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"></head><body>${fragmento}</body></html>`);
 await writeFile(join(saida, '.nojekyll'), '');
 console.log('Site pronto em _site/');

@@ -17,7 +17,7 @@ function abrir(conteudo, titulo) {
   el = document.createElement('div');
   el.className = 'palco';
   el.setAttribute('role', 'status');
-  el.innerHTML = `<svg class="raios" aria-hidden="true"></svg>
+  el.innerHTML = `<div class="palco-sol" aria-hidden="true"></div><svg class="raios" aria-hidden="true"></svg>
     <div class="palco-centro">
       <div class="palco-jogada">${esc(titulo)}</div>
       ${conteudo}
@@ -43,8 +43,37 @@ function centroDe(alvo) {
   return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
 }
 
-// Raio em zigue-zague do slot do Comparsa até o alvo (carta ou total)
-function raio(uid, alvo) {
+// Forma do raio comprada no Bazar (classe forma-* no body)
+const forma = () => (document.body.className.match(/\bforma-(\w+)/)?.[1] ?? 'zigue');
+const ns = 'http://www.w3.org/2000/svg';
+
+// Pontos de um traço de a até b: zigue-zague (desvio aleatório) ou onda (corrente)
+function caminho(a, b, n, amp, onda = false, fase = 0) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const ponta = i === 0 || i === n;
+    const desvio = ponta ? 0 : onda ? Math.sin(t * Math.PI * 4 + fase) * amp * Math.sin(t * Math.PI) : (Math.random() - 0.5) * amp;
+    pts.push([a.x + dx * t + (-dy / len) * desvio, a.y + dy * t + (dx / len) * desvio]);
+  }
+  return pts;
+}
+
+function tracar(svg, pts, extra = '') {
+  for (const classe of ['brilho', 'nucleo']) {
+    const l = document.createElementNS(ns, 'polyline');
+    l.setAttribute('points', pts.map((q) => q.join(',')).join(' '));
+    l.setAttribute('class', `raio ${classe} ${extra}`);
+    svg.appendChild(l);
+    setTimeout(() => l.remove(), 750);
+  }
+}
+
+// Raio do slot do Comparsa até o alvo (carta ou total)
+function raio(uid, alvo, forte = false) {
   const slot = document.querySelector(`.slot[data-uid="${uid}"]`);
   const svg = el?.querySelector('.raios');
   if (!slot || !svg || !alvo) return;
@@ -53,27 +82,65 @@ function raio(uid, alvo) {
   slot.classList.add('pulo', 'disparou');
   const a = centroDe(slot);
   const b = centroDe(alvo);
-  const n = 7;
-  const pts = [];
-  for (let i = 0; i <= n; i++) {
-    const t = i / n;
-    const desvio = i === 0 || i === n ? 0 : (Math.random() - 0.5) * 60;
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const len = Math.hypot(dx, dy) || 1;
-    pts.push(`${a.x + dx * t + (-dy / len) * desvio},${a.y + dy * t + (dx / len) * desvio}`);
+  const f = forma();
+  if (f === 'corrente') {
+    tracar(svg, caminho(a, b, 40, 26, true));
+    tracar(svg, caminho(a, b, 40, 26, true, Math.PI), 'fino');
+  } else if (f === 'duplo') {
+    tracar(svg, caminho({ x: a.x - 10, y: a.y }, b, 8, 70));
+    tracar(svg, caminho({ x: a.x + 10, y: a.y }, b, 8, 70));
+  } else {
+    const pts = caminho(a, b, f === 'galho' ? 10 : 7, 60);
+    tracar(svg, pts);
+    // galhos: pedaços que saem do meio do raio e morrem no ar
+    const galhos = f === 'galho' ? 4 : forte ? 2 : 1;
+    for (let g = 0; g < galhos; g++) {
+      const [x, y] = pts[1 + Math.floor(Math.random() * (pts.length - 3))];
+      const ponta = { x: x + (Math.random() - 0.5) * 160, y: y + (Math.random() - 0.2) * 120 };
+      tracar(svg, caminho({ x, y }, ponta, 4, 30), 'fino');
+    }
   }
-  const ns = 'http://www.w3.org/2000/svg';
-  for (const classe of ['brilho', 'nucleo']) {
-    const l = document.createElementNS(ns, 'polyline');
-    l.setAttribute('points', pts.join(' '));
-    l.setAttribute('class', `raio ${classe}`);
-    svg.appendChild(l);
-    setTimeout(() => l.remove(), 700);
-  }
+  atingir(alvo, forte);
+}
+
+// Impacto: a carta pisca, solta faíscas e uma onda de choque
+function atingir(alvo, forte = false) {
   alvo.classList.remove('atingida');
   void alvo.offsetWidth;
   alvo.classList.add('atingida');
+  if (!el || reduzido) return;
+  const c = centroDe(alvo);
+  const onda = document.createElement('div');
+  onda.className = `onda ${forte ? 'forte' : ''}`;
+  onda.style.left = `${c.x}px`;
+  onda.style.top = `${c.y}px`;
+  el.appendChild(onda);
+  setTimeout(() => onda.remove(), 700);
+  const n = forte ? 22 : 12;
+  for (let i = 0; i < n; i++) {
+    const s = document.createElement('i');
+    s.className = 'faisca';
+    const ang = Math.random() * Math.PI * 2;
+    const dist = 70 + Math.random() * (forte ? 180 : 110);
+    s.style.left = `${c.x}px`;
+    s.style.top = `${c.y}px`;
+    s.style.setProperty('--dx', `${Math.cos(ang) * dist}px`);
+    s.style.setProperty('--dy', `${Math.sin(ang) * dist}px`);
+    s.style.setProperty('--rot', `${(ang * 180) / Math.PI}deg`);
+    el.appendChild(s);
+    setTimeout(() => s.remove(), 750);
+  }
+}
+
+// O sol atrás da carta cresce a cada ponto; ×Mult faz a tela tremer
+function aquecer(nivel, treme) {
+  if (!el) return;
+  el.style.setProperty('--calor', Math.min(1, nivel).toFixed(2));
+  if (treme && !reduzido) {
+    el.classList.remove('treme');
+    void el.offsetWidth;
+    el.classList.add('treme');
+  }
 }
 
 // Número que salta da carta: "+15 Fichas", "×2 Mult"...
@@ -120,12 +187,15 @@ export async function palcoRodada(ev, { cartaHtml, nomeJogada, nomeComparsa, ms 
   let i = 0;
   for (const p of ev.passos) {
     const [texto, classe] = textoPasso(p);
+    const forte = p.tipo === 'xmult';
     if (p.comparsa) {
-      raio(p.comparsa, carta);
+      raio(p.comparsa, carta, forte);
       audio.tocar('raio', i);
     } else {
+      atingir(carta, forte);
       audio.tocar('ponto', i);
     }
+    aquecer((i + 1) / Math.max(3, ev.passos.length), forte);
     saltar(carta, texto, classe);
     caixas(p.fichas, p.mult, p.tipo === 'fichas' ? 'fichas' : 'mult');
     origem.textContent = p.comparsa ? `${nomeComparsa(p.comparsa) ?? p.origem}` : p.origem;
@@ -135,6 +205,11 @@ export async function palcoRodada(ev, { cartaHtml, nomeJogada, nomeComparsa, ms 
   const total = el.querySelector('.palco-total');
   total.innerHTML = ev.total ? `= ${fmt(ev.total)}` : 'Não pontuou';
   total.classList.add('aparece');
+  if (ev.total) {
+    aquecer(1, true);
+    atingir(carta, true);
+    el.classList.add('explode');
+  }
   audio.tocar('total');
   await espera(ms.total);
   fechar();
@@ -156,10 +231,12 @@ export async function palcoMao(ev, { titulo, nomeComparsa, ms }) {
     total.classList.remove('pop');
     void total.offsetWidth;
     total.classList.add('pop', 'aparece');
+    aquecer((i + 1) / ev.passos.length, p.tipo === 'x');
     if (p.comparsa) {
-      raio(p.comparsa, total);
+      raio(p.comparsa, total, p.tipo === 'x');
       audio.tocar('raio', 4 + i);
     } else {
+      if (p.tipo === 'x') atingir(total, true);
       audio.tocar('ponto', 4 + i);
     }
     i++;

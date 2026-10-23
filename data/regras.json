@@ -14,23 +14,23 @@
   },
   "bairros": 8,
   "metas": [
-    [30, 60, 105],
-    [105, 160, 240],
-    [210, 315, 455],
-    [385, 560, 800],
-    [665, 980, 1400],
-    [1120, 1680, 2380],
-    [1900, 2800, 3900],
-    [3150, 4550, 6300]
+    [200, 320, 500],
+    [480, 720, 1100],
+    [900, 1350, 2000],
+    [1600, 2400, 3500],
+    [2800, 4200, 6000],
+    [4800, 7200, 10000],
+    [8000, 12000, 17000],
+    [13000, 19500, 28000]
   ],
-  "crescimentoInfinito": 1.6,
+  "crescimentoInfinito": 1.7,
   "nomesBairros": ["Vila Operária", "Brás", "Mooca", "Bixiga", "Penha", "Lapa", "Santana", "Centro Velho"],
   "economia": {
     "reisIniciais": 4,
-    "recompensaMesa": { "bar": 3, "fundo": 4, "chefao": 5 },
+    "recompensaMesa": { "bar": 2, "fundo": 3, "chefao": 4 },
     "porMaoRestante": 1,
     "jurosACada": 5,
-    "jurosMax": 5,
+    "jurosMax": 4,
     "rerollBase": 5,
     "rerollIncremento": 1,
     "vendaFracao": 0.5
@@ -47,7 +47,7 @@
   },
   "slots": { "comparsas": 5, "consumiveis": 2 },
   "promessas": [
-    { "tipo": "reis", "valor": 6, "descricao": "+6 Réis" },
+    { "tipo": "reis", "valor": 4, "descricao": "+4 Réis" },
     { "tipo": "comparsa", "raridade": "comum", "descricao": "Comparsa comum grátis" },
     { "tipo": "simpatia", "descricao": "Simpatia grátis" },
     { "tipo": "causo", "descricao": "Causo grátis" }

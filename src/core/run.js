@@ -289,15 +289,25 @@ export class Jogo {
     return lista.length ? this.rng.stream('falas').pick(lista) : null;
   }
 
+  // Um baralho de truco só tem uma carta de cada: evita puxar uma carta igual (mesmo valor e
+  // naipe) a uma que já está na mão, na vira ou na mão do adversário. Se não tiver outra, vai ela mesma.
   comprarAte(n) {
     const m = this.run.mesa;
+    const rd = m.rodada;
+    const vis = (c) => `${c.rank}${c.suit}`;
+    const ocupadas = new Set([...(rd?.viras ?? []), ...(rd?.maoAdv ?? [])].map(vis));
+    for (const id of m.mao) ocupadas.add(vis(this.carta(id)));
     while (m.mao.length < n) {
       if (!m.compra.length) {
         if (!m.descarte.length) break;
         m.compra = this.rng.stream('baralho').shuffle(m.descarte);
         m.descarte = [];
       }
-      m.mao.push(m.compra.pop());
+      let i = m.compra.length - 1;
+      while (i >= 0 && ocupadas.has(vis(this.carta(m.compra[i])))) i--;
+      const [id] = m.compra.splice(i >= 0 ? i : m.compra.length - 1, 1);
+      m.mao.push(id);
+      ocupadas.add(vis(this.carta(id)));
     }
   }
 
@@ -310,10 +320,13 @@ export class Jogo {
     m.mao = m.mao.filter(existe);
     m.compra = m.compra.filter(existe);
     m.descarte = m.descarte.filter(existe);
+    m.rodada = null;
     this.comprarAte(m.tamanhoMao);
 
+    // O adversário e a vira saem do mesmo "baralho" da mesa: nunca repetem uma carta da sua mão
+    const naMao = new Set(m.mao.map((id) => { const c = this.carta(id); return `${c.rank}${c.suit}`; }));
     const s = this.rng.stream('adversario');
-    const advDeck = s.shuffle(baralhoPadrao('o'));
+    const advDeck = s.shuffle(baralhoPadrao('o').filter((c) => !naMao.has(`${c.rank}${c.suit}`)));
     const viras = [advDeck.pop()];
     if (this.regra('viraDupla')) viras.push(advDeck.pop());
     const maoAdv = advDeck.splice(-R.mesa.cartasAdversario);

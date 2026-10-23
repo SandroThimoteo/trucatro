@@ -162,7 +162,7 @@ test('perfil: comprar gasta Tampinhas e equipa; sem saldo não compra', () => {
   assert.throws(() => comprarItem(dados, p, 'verso_azulejo'), /Faltam/);
   registrarMesa(p, { venceu: true, tampinhas: 10 });
   comprarItem(dados, p, 'verso_azulejo');
-  assert.equal(p.tampinhas, 4);
+  assert.equal(p.tampinhas, 10 - dados.bazarPorId.verso_azulejo.preco);
   assert.equal(p.equipado.verso, 'verso_azulejo');
   assert.throws(() => comprarItem(dados, p, 'verso_azulejo'), /já tem/);
   equiparItem(dados, p, 'verso_padrao');
