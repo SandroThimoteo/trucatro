@@ -1,0 +1,835 @@
+// Estrutura roguelike: Run → Bairro (3 Mesas) → Mesa (mãos contra a IA) → Boteco.
+// Todo o estado vive em this.run (JSON puro); a UI só lê o estado e chama comandos.
+
+import { SeededRng } from './rng.js';
+import { baralhoPadrao, criarCarta, manilhaRank, forca, isManilha, isZap, RANKS, SUITS } from './cards.js';
+import { criarMao, jogarCarta, pedirTruco, responderTruco, podePedirTruco } from './truco.js';
+import { decidirAcao } from './ai.js';
+import { pontuarVaza, pontuarMao, identificarJogada, valoresJogada } from './scoring.js';
+import { regraAtiva, registrarComparsas } from './comparsas.js';
+import { GameEventBus } from './events.js';
+import { defConsumivel, perfilDe, falasDe } from './dados.js';
+
+export const TIPOS_MESA = ['bar', 'fundo', 'chefao'];
+export const NOME_MESA = { bar: 'Mesa do Bar', fundo: 'Mesa do Fundo', chefao: 'Mesa do Chefão' };
+
+const clone = (x) => JSON.parse(JSON.stringify(x));
+const doJogador = (c) => c.id.startsWith('c');
+
+// Quem senta em cada Mesa de bar e de fundo, bairro a bairro (sem repetir enquanto der).
+function sortearRivais(dados, s, bairros) {
+  const de = (tipo) => s.shuffle(dados.personagens.filter((p) => p.tipo === tipo).map((p) => p.id));
+  const bar = de('bar');
+  const fundo = de('fundo');
+  return Array.from({ length: bairros }, (_, i) => ({ bar: bar[i % bar.length], fundo: fundo[i % fundo.length] }));
+}
+
+export class Jogo {
+  constructor(dados, run, bus = new GameEventBus()) {
+    this.dados = dados;
+    this.run = run;
+    // Saves anteriores aos personagens: sorteia com um stream próprio, sem mexer no rng da run
+    if (!run.rivais) run.rivais = sortearRivais(dados, new SeededRng(`${run.seed}:rivais`).stream('rivais'), dados.regras.bairros);
+    this.rng = SeededRng.fromJSON(run.rng);
+    this.bus = bus;
+    this.reconectar();
+  }
+
+  static novaRun(dados, { seed, baralhoId = 'boteco' }, bus) {
+    const R = dados.regras;
+    const baralho = dados.baralhosPorId[baralhoId];
+    const mod = baralho.mod;
+    const rng = new SeededRng(seed);
+    const setup = rng.stream('setup');
+
+    const deck = baralhoPadrao('c').filter((c) => !(mod.removerRanks ?? []).includes(c.rank));
+    for (const c of setup.shuffle(deck).slice(0, mod.cartasMarcadas ?? 0)) c.melhoria = 'marcada';
+
+    const niveis = Object.fromEntries(dados.jogadasLista.map((j) => [j.id, 1]));
+    const consumiveis = [];
+    for (let i = 0; i < (mod.simpatiasIniciais ?? 0); i++) consumiveis.push({ tipo: 'simpatia', id: setup.pick(dados.simpatias).id });
+
+    const pool = setup.shuffle(dados.chefoes.filter((c) => !c.final));
+    const final = dados.chefoes.find((c) => c.final);
+    const chefoes = [];
+    for (let b = 1; b < R.bairros; b++) chefoes.push(pool[(b - 1) % pool.length].id);
+    chefoes.push(final.id);
+    const rivais = sortearRivais(dados, rng.stream('rivais'), R.bairros);
+
+    const run = {
+      versao: 2,
+      rivais,
+      seed: String(seed),
+      baralhoId,
+      deck,
+      nextCardId: 100,
+      nextUid: 1,
+      comparsas: [],
+      consumiveis,
+      niveis,
+      reis: R.economia.reisIniciais,
+      bairro: 1,
+      mesaIdx: 0,
+      fase: 'mapa',
+      chefoes,
+      slotsComparsa: R.slots.comparsas + (mod.slotsComparsaDelta ?? 0),
+      slotsConsumivel: R.slots.consumiveis,
+      config: {
+        maos: R.mesa.maos + (mod.maosDelta ?? 0),
+        trocas: R.mesa.trocas + (mod.trocasDelta ?? 0),
+        tamanhoMao: R.mesa.tamanhoMao,
+      },
+      agressividadeExtra: mod.agressividadeIA ?? 0,
+      stats: { causosUsados: 0, maosJogadas: 0, maosVencidas: 0, trucosPedidos: 0, adversarioCorreu: 0, maiorMao: 0, mesasVencidas: 0, pulos: 0, tampinhas: 0 },
+      mesa: null,
+      loja: null,
+      promessa: null,
+      resultadoMesa: null,
+      vitoria: false,
+      infinito: false,
+      rng: null,
+    };
+    run.rng = rng.toJSON();
+    const jogo = new Jogo(dados, run, bus);
+    jogo.prepararMapa();
+    return jogo;
+  }
+
+  static carregar(dados, json, bus) {
+    return new Jogo(dados, typeof json === 'string' ? JSON.parse(json) : json, bus);
+  }
+
+  salvar() {
+    this.run.rng = this.rng.toJSON();
+    return JSON.stringify(this.run);
+  }
+
+  reconectar() {
+    registrarComparsas(this.bus, this);
+  }
+
+  emit(tipo, dados = {}) {
+    return this.bus.emit(tipo, { maoIndice: this.run.mesa?.maoIdx ?? 0, ...dados });
+  }
+
+  // ---------- consultas ----------
+
+  regra(tipo) {
+    return regraAtiva(this.run.comparsas, this.dados, tipo);
+  }
+
+  carta(id) {
+    return this.run.deck.find((c) => c.id === id);
+  }
+
+  get rodada() {
+    return this.run.mesa?.rodada ?? null;
+  }
+
+  get chefao() {
+    const id = this.run.mesa?.chefaoId;
+    return id ? this.dados.chefoesPorId[id] : null;
+  }
+
+  // Personagem sentado na Mesa atual (chefão ou não)
+  get pessoa() {
+    const id = this.run.mesa?.pessoaId ?? this.run.mesa?.chefaoId;
+    return id ? this.dados.personagensPorId[id] : null;
+  }
+
+  // Manha da Mesa: regras do personagem que mudam o jogo
+  get regrasMesa() {
+    return this.pessoa?.regras ?? {};
+  }
+
+  infoMesa(bairro = this.run.bairro, mesaIdx = this.run.mesaIdx) {
+    const R = this.dados.regras;
+    const tipo = TIPOS_MESA[mesaIdx];
+    const chefaoId = tipo === 'chefao' ? this.run.chefoes[(bairro - 1) % this.run.chefoes.length] : null;
+    const chefao = chefaoId ? this.dados.chefoesPorId[chefaoId] : null;
+    const pessoaId = chefaoId ?? this.run.rivais[(bairro - 1) % this.run.rivais.length][tipo];
+    const pessoa = this.dados.personagensPorId[pessoaId];
+    const regras = pessoa.regras ?? {};
+    let meta;
+    if (bairro <= R.metas.length) meta = R.metas[bairro - 1][mesaIdx];
+    else meta = Math.round(R.metas[R.metas.length - 1][mesaIdx] * R.crescimentoInfinito ** (bairro - R.metas.length));
+    if (regras.metaMult) meta = Math.round(meta * regras.metaMult);
+    return { tipo, nome: pessoa.nome, meta, chefaoId, chefao, pessoaId, pessoa, regras };
+  }
+
+  nomeBairro(bairro = this.run.bairro) {
+    const nomes = this.dados.regras.nomesBairros;
+    return nomes[(bairro - 1) % nomes.length];
+  }
+
+  ctxForca() {
+    const rd = this.rodada;
+    const vira = rd.vira;
+    const pirata = this.regra('picaFumoPirata');
+    const zapDuplo = this.regra('zapDuplo');
+    const cangaceiro = this.regra('cangadaVence');
+    return {
+      vira,
+      invertida: !!this.regrasMesa.ordemInvertida,
+      extraManilha: pirata ? (c) => doJogador(c) && vira.suit === 'ouros' && c.suit === 'ouros' : null,
+      zapAlias: zapDuplo ? (c) => doJogador(c) && c.suit === 'espadas' && c.rank === manilhaRank(vira) : null,
+      resolverEmpate: cangaceiro ? () => 0 : null,
+    };
+  }
+
+  ganharReis(valor, origem, comparsa = null) {
+    this.run.reis += valor;
+    const rd = this.rodada;
+    if (rd) rd.ganhos.push({ valor, origem, comparsa });
+  }
+
+  // ---------- mapa ----------
+
+  prepararMapa() {
+    const r = this.run;
+    r.fase = 'mapa';
+    r.mesa = null;
+    r.loja = null;
+    r.promessa = TIPOS_MESA[r.mesaIdx] !== 'chefao' ? this.gerarPromessa() : null;
+  }
+
+  gerarPromessa() {
+    const s = this.rng.stream('promessa');
+    const p = clone(s.pick(this.dados.regras.promessas));
+    if (p.tipo === 'comparsa') {
+      const opcoes = this.dados.comparsas.filter((c) => c.raridade === p.raridade && !this.run.comparsas.some((x) => x.id === c.id));
+      p.id = (opcoes.length ? s.pick(opcoes) : s.pick(this.dados.comparsas)).id;
+      p.descricao = `Comparsa grátis: ${this.dados.comparsasPorId[p.id].nome}`;
+    } else if (p.tipo === 'simpatia') {
+      p.id = s.pick(this.dados.simpatias).id;
+      p.descricao = this.dados.simpatiasPorId[p.id].nome;
+    } else if (p.tipo === 'causo') {
+      p.id = s.pick(this.dados.causos).id;
+      p.descricao = this.dados.causosPorId[p.id].nome;
+    }
+    return p;
+  }
+
+  pularMesa() {
+    const r = this.run;
+    if (r.fase !== 'mapa' || !r.promessa) throw new Error('Esta Mesa não pode ser pulada');
+    const p = r.promessa;
+    if (p.tipo === 'reis') r.reis += p.valor;
+    else if (p.tipo === 'comparsa' && r.comparsas.length < r.slotsComparsa) this.adicionarComparsa(p.id);
+    else if ((p.tipo === 'simpatia' || p.tipo === 'causo') && r.consumiveis.length < r.slotsConsumivel) r.consumiveis.push({ tipo: p.tipo, id: p.id });
+    r.stats.pulos++;
+    r.mesaIdx++;
+    this.prepararMapa();
+  }
+
+  adicionarComparsa(id) {
+    const r = this.run;
+    r.comparsas.push({ uid: r.nextUid++, id, estado: {}, desativada: false });
+    this.reconectar();
+  }
+
+  // ---------- mesa ----------
+
+  iniciarMesa() {
+    const r = this.run;
+    if (r.fase !== 'mapa') throw new Error('Não dá pra começar uma Mesa agora');
+    const info = this.infoMesa();
+    for (const c of r.comparsas) {
+      c.desativada = false;
+      c.estado = {};
+    }
+    const perfil = perfilDe(this.dados, info.pessoa);
+    perfil.agressividade = Math.min(1, perfil.agressividade + r.agressividadeExtra);
+    const benz = this.regra('benzedeira');
+    const rg = info.regras;
+    let cobrado = 0;
+    if (rg.cobraReis) {
+      cobrado = Math.min(r.reis, rg.cobraReis);
+      r.reis -= cobrado;
+    }
+    r.mesa = {
+      tipo: info.tipo,
+      chefaoId: info.chefaoId,
+      pessoaId: info.pessoaId,
+      meta: info.meta,
+      pontos: 0,
+      maosRestantes: Math.max(2, r.config.maos + (rg.maosDelta ?? 0)),
+      trocasRestantes: rg.semTrocas ? 0 : Math.max(0, r.config.trocas + (rg.trocasDelta ?? 0)),
+      cobrado,
+      tamanhoMao: r.config.tamanhoMao,
+      perfil,
+      compra: this.rng.stream('baralho').shuffle(r.deck.map((c) => c.id)),
+      descarte: [],
+      mao: [],
+      maoIdx: 0,
+      benzedeiraUsos: benz?.usosPorMesa ?? 0,
+      rodada: null,
+      historico: [],
+    };
+    r.fase = 'mesa';
+    this.emit('OnMesaIniciada', { tipo: info.tipo, meta: info.meta, chefao: info.chefaoId, pessoa: info.pessoaId });
+    this.novaRodada();
+    this.rodada.fala = this.sortearFala('entrada');
+    if (this.rodada.fala) this.emit('OnFala', { texto: this.rodada.fala, pessoa: info.pessoaId });
+  }
+
+  sortearFala(momento) {
+    const lista = falasDe(this.dados, this.pessoa, momento);
+    return lista.length ? this.rng.stream('falas').pick(lista) : null;
+  }
+
+  comprarAte(n) {
+    const m = this.run.mesa;
+    while (m.mao.length < n) {
+      if (!m.compra.length) {
+        if (!m.descarte.length) break;
+        m.compra = this.rng.stream('baralho').shuffle(m.descarte);
+        m.descarte = [];
+      }
+      m.mao.push(m.compra.pop());
+    }
+  }
+
+  novaRodada() {
+    const r = this.run;
+    const m = r.mesa;
+    const R = this.dados.regras;
+    // Cartas que saíram do baralho (Causo do Fogo, vidro quebrado) somem da mão e da pilha
+    const existe = (id) => !!this.carta(id);
+    m.mao = m.mao.filter(existe);
+    m.compra = m.compra.filter(existe);
+    m.descarte = m.descarte.filter(existe);
+    this.comprarAte(m.tamanhoMao);
+
+    const s = this.rng.stream('adversario');
+    const advDeck = s.shuffle(baralhoPadrao('o'));
+    const viras = [advDeck.pop()];
+    if (this.regra('viraDupla')) viras.push(advDeck.pop());
+    const maoAdv = advDeck.splice(-R.mesa.cartasAdversario);
+
+    m.rodada = {
+      indice: m.maoIdx,
+      fase: viras.length > 1 ? 'vira' : 'troca',
+      viras,
+      vira: viras.length > 1 ? null : viras[0],
+      maoAdv,
+      restoAdv: advDeck,
+      iniciante: m.maoIdx % 2,
+      onze: R.mesa.ultimaMaoDeOnze && !this.regrasMesa.semMaoDeOnze && m.maosRestantes === 1,
+      reveladas: [],
+      numVazas: 3,
+      mao: null,
+      maoAntes: null,
+      vazasPontuadas: [],
+      bonusMultProxima: 0,
+      memoriaIA: {},
+      revelada: false,
+      fala: null,
+      ganhos: [],
+      quebradas: [],
+      resultado: null,
+    };
+    this.emit('OnMaoDistribuida', { mao: [...m.mao] });
+    if (m.rodada.vira) this.revelarVira();
+  }
+
+  revelarVira() {
+    const rd = this.rodada;
+    const n = this.regrasMesa.manilhasGarantidas ?? 0;
+    if (n) {
+      const mr = manilhaRank(rd.vira);
+      const ctx = { vira: rd.vira };
+      let manilhas = rd.maoAdv.filter((c) => c.rank === mr).length;
+      while (manilhas < n) {
+        const iExtra = rd.restoAdv.findIndex((c) => c.rank === mr);
+        if (iExtra < 0) break;
+        const [extra] = rd.restoAdv.splice(iExtra, 1);
+        const comuns = rd.maoAdv.filter((c) => c.rank !== mr).sort((a, b) => forca(a, ctx) - forca(b, ctx));
+        const sai = comuns[0];
+        rd.maoAdv[rd.maoAdv.indexOf(sai)] = extra;
+        rd.restoAdv.push(sai);
+        manilhas++;
+      }
+    }
+    delete rd.restoAdv;
+    rd.reveladas = rd.maoAdv.slice(0, this.regrasMesa.revelaCartas ?? 0).map((c) => c.id);
+    this.emit('OnViraRevelada', { vira: rd.vira });
+  }
+
+  escolherVira(i) {
+    const rd = this.rodada;
+    if (rd?.fase !== 'vira') throw new Error('Não há vira para escolher');
+    rd.vira = rd.viras[i];
+    rd.fase = 'troca';
+    this.revelarVira();
+  }
+
+  trocar(ids) {
+    const m = this.run.mesa;
+    const rd = this.rodada;
+    if (rd?.fase !== 'troca') throw new Error('Só dá pra trocar antes da primeira vaza');
+    if (m.trocasRestantes <= 0) throw new Error('Sem trocas nesta Mesa');
+    if (!ids.length || !ids.every((id) => m.mao.includes(id))) throw new Error('Selecione cartas da sua mão');
+    m.mao = m.mao.filter((id) => !ids.includes(id));
+    m.descarte.push(...ids);
+    m.trocasRestantes--;
+    this.comprarAte(m.tamanhoMao);
+  }
+
+  comecarRodada() {
+    const m = this.run.mesa;
+    const rd = this.rodada;
+    if (rd?.fase !== 'troca') throw new Error('A mão já começou');
+    const R = this.dados.regras;
+    const primeira = this.regra('valorInicialPrimeiraMao');
+    let valor = 1;
+    if (rd.onze) valor = R.mesa.valorMaoDeOnze;
+    else if (this.regrasMesa.valorInicial) valor = this.regrasMesa.valorInicial;
+    else if (m.maoIdx === 0 && primeira) valor = primeira.valor;
+    rd.mao = criarMao({
+      maos: [m.mao.map((id) => clone(this.carta(id))), rd.maoAdv],
+      vira: rd.vira,
+      iniciante: rd.iniciante,
+      valor,
+      numVazas: rd.numVazas,
+      trucoPermitido: !rd.onze && !this.regrasMesa.semTruco,
+      valores: R.truco.valores,
+    });
+    rd.fase = 'jogo';
+  }
+
+  jogarCarta(id) {
+    const rd = this.rodada;
+    if (rd?.fase === 'troca') this.comecarRodada();
+    if (rd?.fase !== 'jogo') throw new Error('Não dá pra jogar agora');
+    rd.maoAntes = rd.mao.maos[0].map((c) => ({ ...c }));
+    this.processar(jogarCarta(rd.mao, 0, id, this.ctxForca()));
+  }
+
+  podePedirTruco() {
+    const rd = this.rodada;
+    if (!rd || rd.onze || this.regrasMesa.semTruco) return false;
+    if (rd.fase === 'troca') return rd.iniciante === 0;
+    return rd.fase === 'jogo' && podePedirTruco(rd.mao, 0);
+  }
+
+  pedirTruco() {
+    const rd = this.rodada;
+    if (rd?.fase === 'troca') this.comecarRodada();
+    if (rd?.fase !== 'jogo') throw new Error('Não dá pra pedir truco agora');
+    this.run.stats.trucosPedidos++;
+    rd.fala = null;
+    this.processar(pedirTruco(rd.mao, 0));
+  }
+
+  responderTruco(resposta) {
+    const rd = this.rodada;
+    if (rd?.fase !== 'jogo') throw new Error('Não há truco pendente');
+    this.processar(responderTruco(rd.mao, 0, resposta));
+  }
+
+  benzer() {
+    const m = this.run.mesa;
+    const rd = this.rodada;
+    if (!this.regra('benzedeira') || m.benzedeiraUsos <= 0) throw new Error('A Benzedeira já ajudou nesta Mesa');
+    if (!rd || rd.fase === 'fim') throw new Error('Nada pra revelar agora');
+    m.benzedeiraUsos--;
+    rd.revelada = true;
+  }
+
+  processar(eventos) {
+    const m = this.run.mesa;
+    for (const ev of eventos) {
+      if (ev.tipo === 'OnCartaJogada' && ev.jogador === 0) {
+        m.mao = m.mao.filter((id) => id !== ev.carta.id);
+        m.descarte.push(ev.carta.id);
+      }
+      this.emit(ev.tipo, ev);
+      if (ev.tipo === 'OnVazaResolvida') this.aoResolverVaza(ev.vaza);
+      if (ev.tipo === 'OnMaoFinalizada') this.aoFinalizarMao();
+    }
+  }
+
+  aoResolverVaza(vaza) {
+    const rd = this.rodada;
+    const minha = vaza.cartas[0];
+    const dele = vaza.cartas[1];
+    if (vaza.vencedor === 'empate') {
+      rd.bonusMultProxima += valoresJogada(this.dados, this.run.niveis, 'cangada').multProxima;
+      return;
+    }
+    if (vaza.vencedor !== 0) return;
+    const ctxF = this.ctxForca();
+    const jogada = identificarJogada({
+      carta: minha, cartaAdv: dele, maoAntes: rd.maoAntes ?? [minha], ctx: ctxF, empateConvertido: vaza.empateConvertido,
+    });
+    const sc = pontuarVaza({
+      dados: this.dados, carta: minha, jogada, ctxForca: ctxF, niveis: this.run.niveis,
+      comparsas: this.run.comparsas, pessoa: this.pessoa, bonusMult: rd.bonusMultProxima,
+      info: {
+        vazaIndice: vaza.indice,
+        vazasVencidasAntes: rd.vazasPontuadas.length,
+        maoIndice: this.run.mesa.maoIdx,
+        causosUsados: this.run.stats.causosUsados,
+      },
+    });
+    rd.bonusMultProxima = 0;
+    const registro = { indice: vaza.indice, carta: minha, jogada, fichas: sc.fichas, mult: sc.mult, total: sc.totalFinal, passos: sc.passos };
+    rd.vazasPontuadas.push(registro);
+    if (sc.reis) this.ganharReis(sc.reis, 'Carta de Ouro');
+    if (this.regrasMesa.reisPorVaza) this.ganharReis(this.regrasMesa.reisPorVaza, this.pessoa.nome);
+    if (minha.melhoria === 'vidro' && this.rng.stream('vidro').chance(this.dados.cartas.melhorias.vidro.chanceQuebrar)) {
+      rd.quebradas.push(minha.id);
+    }
+    this.emit('OnVazaPontuada', { ...registro });
+  }
+
+  // Adversário correu: sua melhor carta na mão pontua como se tivesse vencido uma vaza.
+  pontuarFuga() {
+    const rd = this.rodada;
+    const st = rd.mao;
+    const ctxF = this.ctxForca();
+    const melhor = [...st.maos[0]].sort((a, b) => forca(b, ctxF) - forca(a, ctxF))[0];
+    const jogada = isZap(melhor, ctxF) ? 'zapada' : isManilha(melhor, ctxF) ? 'manilhada' : 'vaza_simples';
+    const sc = pontuarVaza({
+      dados: this.dados, carta: melhor, jogada, ctxForca: ctxF, niveis: this.run.niveis,
+      comparsas: this.run.comparsas, pessoa: this.pessoa, bonusMult: rd.bonusMultProxima,
+      info: {
+        vazaIndice: st.vazas.length,
+        vazasVencidasAntes: rd.vazasPontuadas.length,
+        maoIndice: this.run.mesa.maoIdx,
+        causosUsados: this.run.stats.causosUsados,
+      },
+    });
+    rd.bonusMultProxima = 0;
+    const registro = { indice: st.vazas.length, carta: melhor, jogada, fichas: sc.fichas, mult: sc.mult, total: sc.totalFinal, passos: sc.passos, fuga: true };
+    rd.vazasPontuadas.push(registro);
+    this.emit('OnVazaPontuada', { ...registro });
+  }
+
+  aoFinalizarMao() {
+    const r = this.run;
+    const m = r.mesa;
+    const rd = this.rodada;
+    const st = rd.mao;
+    const valores = st.valores;
+    const aumentos = Math.max(0, valores.indexOf(st.valor) - valores.indexOf(st.valorInicial));
+    const resultados = st.vazas.map((v) => v.vencedor);
+    const venceu = st.vencedor === 0;
+    let pontos = 0;
+    let maoCtx = null;
+    let penalidade = 0;
+    let comparsaPerdida = null;
+    const bonus = [];
+
+    if (venceu) {
+      if (st.correu === 1 && this.dados.regras.truco.fugaPontuaMelhorCarta && st.maos[0].length) this.pontuarFuga();
+      if (st.correu === null) {
+        const vitorias = resultados.filter((x) => x === 0).length;
+        if (vitorias === st.numVazas) bonus.push('queda_limpa');
+        if (st.numVazas === 3 && resultados.join() === '1,0,0') bonus.push('virada');
+        if (rd.onze) bonus.push('mao_de_onze');
+      }
+      maoCtx = pontuarMao({
+        dados: this.dados, niveis: r.niveis, vazas: rd.vazasPontuadas, bonus, valor: st.valor,
+        comparsas: r.comparsas, info: { aumentos, maoIndice: m.maoIdx },
+      });
+      pontos = maoCtx.total;
+      r.stats.maosVencidas++;
+      if (st.correu === 1) r.stats.adversarioCorreu++;
+      // Selo Azul: gera a Simpatia da Jogada usada
+      for (const v of rd.vazasPontuadas) {
+        if (v.carta.selo !== 'azul' || r.consumiveis.length >= r.slotsConsumivel) continue;
+        const simp = this.dados.simpatias.find((s) => s.jogada === v.jogada);
+        if (simp) r.consumiveis.push({ tipo: 'simpatia', id: simp.id });
+      }
+    } else {
+      // Blefe pago: seu truco foi aceito e você perdeu a mão
+      if (st.vencedor === 1 && st.correu === null && st.ultimoAumento === 0) penalidade = this.dados.regras.truco.penalidadeMaosBlefe;
+      if (st.correu === 0 && this.regrasMesa.correrCustaComparsa) {
+        const ativos = r.comparsas.filter((c) => !c.desativada);
+        if (ativos.length) {
+          const alvo = this.rng.stream('chefao').pick(ativos);
+          alvo.desativada = true;
+          comparsaPerdida = alvo.id;
+          this.reconectar();
+        }
+      }
+    }
+
+    // Vidro quebrado sai do baralho
+    if (rd.quebradas.length) r.deck = r.deck.filter((c) => !rd.quebradas.includes(c.id));
+
+    m.pontos += pontos;
+    m.maosRestantes = Math.max(0, m.maosRestantes - 1 - penalidade);
+    r.stats.maosJogadas++;
+    r.stats.maiorMao = Math.max(r.stats.maiorMao, pontos);
+    rd.resultado = {
+      venceu, vencedor: st.vencedor, pontos, valor: st.valor, correu: st.correu, penalidade, comparsaPerdida,
+      bonus, passos: maoCtx?.passos ?? [],
+    };
+    rd.fase = 'fim';
+    m.historico.push({ venceu, pontos, valor: st.valor });
+    this.emit('MaoPontuada', { ...rd.resultado });
+
+    if (m.pontos >= m.meta) this.vencerMesa();
+    else if (m.maosRestantes <= 0) this.perderRun();
+  }
+
+  proximaMao() {
+    const m = this.run.mesa;
+    if (this.run.fase !== 'mesa' || this.rodada?.fase !== 'fim') throw new Error('A mão ainda não acabou');
+    m.maoIdx++;
+    this.novaRodada();
+  }
+
+  vencerMesa() {
+    const r = this.run;
+    const m = r.mesa;
+    const E = this.dados.regras.economia;
+    const base = E.recompensaMesa[m.tipo];
+    const porMao = m.maosRestantes * E.porMaoRestante;
+    const juros = Math.min(E.jurosMax, Math.floor(r.reis / E.jurosACada));
+    const extra = this.regrasMesa.recompensaExtra ?? 0;
+    r.reis += base + porMao + juros + extra;
+    const ultimoBairro = this.dados.regras.bairros;
+    const venceuRun = !r.infinito && r.bairro === ultimoBairro && m.tipo === 'chefao';
+    const tampinhas = this.tampinhasDaMesa(venceuRun);
+    r.stats.tampinhas = (r.stats.tampinhas ?? 0) + tampinhas;
+    r.resultadoMesa = {
+      venceu: true, base, porMao, juros, extra, total: base + porMao + juros + extra, tampinhas,
+      pontos: m.pontos, meta: m.meta, tipo: m.tipo, pessoaId: m.pessoaId, fala: this.sortearFala('derrota'),
+    };
+    r.stats.mesasVencidas++;
+    for (const c of r.comparsas) c.desativada = false;
+    this.reconectar();
+    this.emit('OnMesaFinalizada', { venceu: true, ...r.resultadoMesa });
+    if (venceuRun) {
+      r.fase = 'vitoria';
+      r.vitoria = true;
+    } else {
+      r.fase = 'recompensa';
+    }
+  }
+
+  // Só Chefões deixam cair Tampinhas (moeda que fica entre as runs); cada um paga um valor.
+  tampinhasDaMesa(venceuRun = false, ch = this.chefao, bairro = this.run.bairro) {
+    if (!ch) return 0;
+    const B = this.dados.bazar.recompensas;
+    return (ch.drop ?? 0) + (bairro - 1) * B.porBairro + (venceuRun ? B.vitoriaRun : 0);
+  }
+
+  perderRun() {
+    const r = this.run;
+    r.resultadoMesa = { venceu: false, pontos: r.mesa.pontos, meta: r.mesa.meta, tipo: r.mesa.tipo };
+    this.emit('OnMesaFinalizada', { venceu: false, ...r.resultadoMesa });
+    r.fase = 'derrota';
+  }
+
+  continuarInfinito() {
+    if (this.run.fase !== 'vitoria') throw new Error('Só depois de vencer o Rei do Truco');
+    this.run.infinito = true;
+    this.run.fase = 'recompensa';
+  }
+
+  // ---------- boteco ----------
+
+  irAoBoteco() {
+    if (this.run.fase !== 'recompensa') throw new Error('Termine a Mesa primeiro');
+    this.run.fase = 'boteco';
+    this.run.mesa = null;
+    this.run.loja = { itens: this.gerarItensLoja(), rerollCusto: this.dados.regras.economia.rerollBase };
+    this.emit('OnLojaAberta', {});
+  }
+
+  sortearComparsa(s, excluir) {
+    const pesos = this.dados.regras.loja.pesosRaridade;
+    const raridade = s.weighted(Object.entries(pesos));
+    const livres = this.dados.comparsas.filter((c) => !excluir.has(c.id));
+    if (!livres.length) return null;
+    const daRaridade = livres.filter((c) => c.raridade === raridade);
+    return s.pick(daRaridade.length ? daRaridade : livres);
+  }
+
+  gerarItensLoja() {
+    const L = this.dados.regras.loja;
+    const s = this.rng.stream('loja');
+    const itens = [];
+    const excluir = new Set(this.run.comparsas.map((c) => c.id));
+    for (let i = 0; i < L.comparsas; i++) {
+      const def = this.sortearComparsa(s, excluir);
+      if (!def) continue;
+      excluir.add(def.id);
+      itens.push({ tipo: 'comparsa', id: def.id, preco: def.preco, vendido: false });
+    }
+    for (let i = 0; i < L.consumiveis; i++) {
+      const tipo = s.chance(0.5) ? 'causo' : 'simpatia';
+      const def = s.pick(tipo === 'causo' ? this.dados.causos : this.dados.simpatias);
+      itens.push({ tipo, id: def.id, preco: def.preco, vendido: false });
+    }
+    for (let i = 0; i < L.cartas; i++) {
+      const carta = criarCarta('novo', s.pick(RANKS), s.pick(SUITS));
+      if (s.chance(L.chanceMelhoria)) carta.melhoria = s.pick(Object.keys(this.dados.cartas.melhorias));
+      if (s.chance(L.chanceSelo)) carta.selo = s.pick(Object.keys(this.dados.cartas.selos));
+      const preco = carta.melhoria || carta.selo ? L.precoCartaMelhorada : L.precoCarta;
+      itens.push({ tipo: 'carta', carta, preco, vendido: false });
+    }
+    return itens;
+  }
+
+  comprar(i) {
+    const r = this.run;
+    if (r.fase !== 'boteco') throw new Error('O Boteco está fechado');
+    const item = r.loja.itens[i];
+    if (!item || item.vendido) throw new Error('Item indisponível');
+    if (r.reis < item.preco) throw new Error('Réis insuficientes');
+    if (item.tipo === 'comparsa') {
+      if (r.comparsas.length >= r.slotsComparsa) throw new Error('Sem espaço para Comparsas (venda um)');
+      this.adicionarComparsa(item.id);
+    } else if (item.tipo === 'carta') {
+      r.deck.push({ ...clone(item.carta), id: `c${r.nextCardId++}` });
+    } else {
+      if (r.consumiveis.length >= r.slotsConsumivel) throw new Error('Sem espaço para consumíveis');
+      r.consumiveis.push({ tipo: item.tipo, id: item.id });
+    }
+    r.reis -= item.preco;
+    item.vendido = true;
+    this.emit('OnCartaComprada', { item: clone(item) });
+  }
+
+  precoVenda(uid) {
+    const inst = this.run.comparsas.find((c) => c.uid === uid);
+    const def = this.dados.comparsasPorId[inst.id];
+    return Math.max(1, Math.floor(def.preco * this.dados.regras.economia.vendaFracao));
+  }
+
+  venderComparsa(uid) {
+    const r = this.run;
+    if (r.fase === 'mesa') throw new Error('Não dá pra vender no meio da Mesa');
+    const i = r.comparsas.findIndex((c) => c.uid === uid);
+    if (i < 0) throw new Error('Comparsa não encontrado');
+    r.reis += this.precoVenda(uid);
+    r.comparsas.splice(i, 1);
+    this.reconectar();
+  }
+
+  moverComparsa(uid, direcao) {
+    const lista = this.run.comparsas;
+    const i = lista.findIndex((c) => c.uid === uid);
+    const j = i + direcao;
+    if (i < 0 || j < 0 || j >= lista.length) return;
+    [lista[i], lista[j]] = [lista[j], lista[i]];
+    this.reconectar();
+  }
+
+  reroll() {
+    const r = this.run;
+    if (r.fase !== 'boteco') throw new Error('O Boteco está fechado');
+    if (r.reis < r.loja.rerollCusto) throw new Error('Réis insuficientes');
+    r.reis -= r.loja.rerollCusto;
+    r.loja.rerollCusto += this.dados.regras.economia.rerollIncremento;
+    r.loja.itens = this.gerarItensLoja();
+  }
+
+  sairDoBoteco() {
+    const r = this.run;
+    if (r.fase !== 'boteco') throw new Error('Você não está no Boteco');
+    r.mesaIdx++;
+    if (r.mesaIdx >= TIPOS_MESA.length) {
+      r.mesaIdx = 0;
+      r.bairro++;
+    }
+    this.prepararMapa();
+  }
+
+  // ---------- consumíveis ----------
+
+  podeUsarCausoAgora() {
+    return this.run.fase === 'mesa' && this.rodada?.fase === 'troca';
+  }
+
+  usarConsumivel(idx, alvos = []) {
+    const r = this.run;
+    const item = r.consumiveis[idx];
+    if (!item) throw new Error('Consumível não encontrado');
+    const def = defConsumivel(this.dados, item);
+    if (item.tipo === 'simpatia') {
+      r.niveis[def.jogada] = (r.niveis[def.jogada] ?? 1) + 1;
+    } else {
+      if (!this.podeUsarCausoAgora()) throw new Error('Causos só valem na Mesa, antes da primeira vaza');
+      const m = r.mesa;
+      if (alvos.length < def.alvosMin || alvos.length > def.alvosMax) {
+        throw new Error(def.alvosMin === def.alvosMax ? `Selecione ${def.alvosMin} carta(s)` : `Selecione de ${def.alvosMin} a ${def.alvosMax} cartas`);
+      }
+      if (!alvos.every((id) => m.mao.includes(id))) throw new Error('Selecione cartas da sua mão');
+      const cartas = alvos.map((id) => this.carta(id));
+      const e = def.efeito;
+      if (e.tipo === 'mudarNaipe') cartas[0].suit = e.naipe;
+      else if (e.tipo === 'bonusFichas') cartas[0].bonusFichas += e.valor;
+      else if (e.tipo === 'melhoria') cartas[0].melhoria = e.melhoria;
+      else if (e.tipo === 'selo') cartas[0].selo = e.selo;
+      else if (e.tipo === 'copiar') {
+        const { rank, suit, bonusFichas, melhoria, selo } = cartas[0];
+        Object.assign(cartas[1], { rank, suit, bonusFichas, melhoria, selo });
+      } else if (e.tipo === 'destruir') {
+        r.deck = r.deck.filter((c) => !alvos.includes(c.id));
+        m.mao = m.mao.filter((id) => !alvos.includes(id));
+        this.comprarAte(m.tamanhoMao);
+      }
+      r.stats.causosUsados++;
+    }
+    r.consumiveis.splice(idx, 1);
+  }
+
+  descartarConsumivel(idx) {
+    this.run.consumiveis.splice(idx, 1);
+  }
+
+  // ---------- IA ----------
+
+  iaPrecisaAgir() {
+    const rd = this.rodada;
+    if (this.run.fase !== 'mesa' || rd?.fase !== 'jogo' || rd.mao.fim) return false;
+    const st = rd.mao;
+    return st.pedido ? st.pedido.por === 0 : st.vez === 1;
+  }
+
+  // Abrir a mão quando o adversário começa (fim da fase de troca).
+  podeAbrirParaIA() {
+    const rd = this.rodada;
+    return rd?.fase === 'troca' && rd.iniciante === 1;
+  }
+
+  passoIA() {
+    const rd = this.rodada;
+    const st = rd.mao;
+    const ctx = this.ctxForca();
+    const acao = decidirAcao(st, this.run.mesa.perfil, ctx, this.rng.stream('ia'), rd.memoriaIA, {
+      aumentaSempre: !!this.regrasMesa.aumentaSempre,
+    });
+    // A fala sai antes do evento (o grito de truco vem antes do carimbo)
+    const falar = (momento) => {
+      rd.fala = this.sortearFala(momento);
+      if (rd.fala) this.emit('OnFala', { texto: rd.fala, pessoa: this.pessoa?.id });
+    };
+    if (acao.tipo === 'responder') {
+      falar(acao.resposta);
+      this.processar(responderTruco(st, 1, acao.resposta));
+    } else if (acao.tipo === 'pedir') {
+      falar('pedir');
+      this.processar(pedirTruco(st, 1));
+    } else {
+      const antes = st.vazas.length;
+      this.processar(jogarCarta(st, 1, acao.cartaId, ctx));
+      const nova = st.vazas.length > antes ? st.vazas[st.vazas.length - 1] : null;
+      if (nova && nova.vencedor !== 'empate') falar(nova.vencedor === 1 ? 'venceuVaza' : 'perdeuVaza');
+      else rd.fala = null;
+    }
+    return acao;
+  }
+
+  avancarIA() {
+    let n = 0;
+    while (this.iaPrecisaAgir() && n++ < 50) this.passoIA();
+  }
+}

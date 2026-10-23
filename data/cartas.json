@@ -1,0 +1,14 @@
+{
+  "fichasCarta": { "4": 2, "5": 3, "6": 4, "7": 5, "Q": 6, "J": 7, "K": 8, "A": 10, "2": 12, "3": 15 },
+  "fichasManilha": 20,
+  "fichasZap": 30,
+  "melhorias": {
+    "ouro": { "nome": "Carta de Ouro", "descricao": "+3 Réis quando vence uma vaza", "reis": 3, "detalhe": "Fundo dourado. Sempre que esta carta vence uma vaza, você ganha 3 réis na hora." },
+    "vidro": { "nome": "Carta de Vidro", "descricao": "×2 Mult; 1 em 4 de quebrar ao vencer", "xmult": 2, "chanceQuebrar": 0.25, "detalhe": "Carta transparente. Ao vencer uma vaza, multiplica o Mult por 2, mas tem 25% de chance de quebrar e sair do baralho depois." },
+    "marcada": { "nome": "Carta Marcada", "descricao": "O adversário sempre responde com a carta mais fraca", "detalhe": "Tem um X no canto. Quando o adversário responde a esta carta, ele joga sempre a carta mais fraca que tiver. Bom para abrir a vaza." }
+  },
+  "selos": {
+    "vermelho": { "nome": "Selo Vermelho", "descricao": "Fichas da carta e melhoria contam duas vezes", "detalhe": "Bolinha vermelha. As Fichas da carta (e a melhoria, como o ×2 do Vidro ou os réis do Ouro) são aplicadas duas vezes quando ela vence." },
+    "azul": { "nome": "Selo Azul", "descricao": "Gera a Simpatia da Jogada usada se você vencer a mão", "detalhe": "Bolinha azul. Se esta carta pontuar uma vaza e você ganhar a mão, você recebe a Simpatia da Jogada que ela fez (se houver espaço)." }
+  }
+}

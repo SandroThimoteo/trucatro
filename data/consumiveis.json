@@ -1,0 +1,42 @@
+{
+  "causos": [
+    { "id": "causo_ferreiro", "nome": "Causo do Ferreiro", "preco": 3, "alvosMin": 1, "alvosMax": 1,
+      "descricao": "Transforma 1 carta da mão em Paus",
+      "detalhe": "Escolha 1 carta da mão: ela muda para Paus, de vez (fica assim no baralho). Útil para formar o Zap quando a manilha é a carta escolhida.",
+      "efeito": { "tipo": "mudarNaipe", "naipe": "paus" } },
+    { "id": "causo_espelho", "nome": "Causo do Espelho", "preco": 4, "alvosMin": 2, "alvosMax": 2,
+      "descricao": "Selecione 2 cartas: a 2ª vira cópia da 1ª",
+      "detalhe": "Selecione 2 cartas na ordem: a segunda vira uma cópia exata da primeira (número, naipe, melhoria e selo). Copie uma manilha ou uma carta melhorada.",
+      "efeito": { "tipo": "copiar" } },
+    { "id": "causo_fogo", "nome": "Causo do Fogo", "preco": 3, "alvosMin": 1, "alvosMax": 2,
+      "descricao": "Destrói até 2 cartas da mão (saem do baralho)",
+      "detalhe": "Selecione 1 ou 2 cartas: elas saem do seu baralho para sempre e você compra outras. Serve para afinar o baralho tirando cartas fracas.",
+      "efeito": { "tipo": "destruir" } },
+    { "id": "causo_promessa", "nome": "Causo da Promessa", "preco": 3, "alvosMin": 1, "alvosMax": 1,
+      "descricao": "+10 Fichas permanentes em 1 carta",
+      "detalhe": "A carta escolhida ganha +10 Fichas para sempre. O bônus aparece no canto da carta e soma toda vez que ela vencer uma vaza.",
+      "efeito": { "tipo": "bonusFichas", "valor": 10 } },
+    { "id": "causo_ourives", "nome": "Causo do Ourives", "preco": 4, "alvosMin": 1, "alvosMax": 1,
+      "descricao": "Transforma 1 carta em Carta de Ouro",
+      "detalhe": "A carta vira Carta de Ouro: toda vez que vencer uma vaza, você ganha 3 réis.",
+      "efeito": { "tipo": "melhoria", "melhoria": "ouro" } },
+    { "id": "causo_vidraceiro", "nome": "Causo do Vidraceiro", "preco": 4, "alvosMin": 1, "alvosMax": 1,
+      "descricao": "Transforma 1 carta em Carta de Vidro",
+      "detalhe": "A carta vira Carta de Vidro: dobra o Mult quando vence, mas tem 1 chance em 4 de quebrar e sair do baralho.",
+      "efeito": { "tipo": "melhoria", "melhoria": "vidro" } },
+    { "id": "causo_lacre", "nome": "Causo do Lacre", "preco": 5, "alvosMin": 1, "alvosMax": 1,
+      "descricao": "Põe Selo Vermelho em 1 carta",
+      "detalhe": "Põe Selo Vermelho na carta: as Fichas dela e o efeito da melhoria contam duas vezes.",
+      "efeito": { "tipo": "selo", "selo": "vermelho" } }
+  ],
+  "simpatias": [
+    { "id": "simpatia_santo_antonio", "nome": "Simpatia de Santo Antônio", "preco": 3, "jogada": "vaza_simples", "descricao": "Sobe 1 nível de Vaza Simples" },
+    { "id": "simpatia_cosme_damiao", "nome": "Simpatia de Cosme e Damião", "preco": 3, "jogada": "matar_seco", "descricao": "Sobe 1 nível de Matar Seco" },
+    { "id": "simpatia_sao_jorge", "nome": "Simpatia de São Jorge", "preco": 3, "jogada": "manilhada", "descricao": "Sobe 1 nível de Manilhada" },
+    { "id": "simpatia_arruda", "nome": "Simpatia da Arruda", "preco": 3, "jogada": "zapada", "descricao": "Sobe 1 nível de Zapada" },
+    { "id": "simpatia_sao_bento", "nome": "Simpatia de São Bento", "preco": 3, "jogada": "queda_limpa", "descricao": "Sobe 1 nível de Queda Limpa" },
+    { "id": "simpatia_lua_cheia", "nome": "Simpatia da Lua Cheia", "preco": 3, "jogada": "virada", "descricao": "Sobe 1 nível de Virada" },
+    { "id": "simpatia_sete_ervas", "nome": "Simpatia das Sete Ervas", "preco": 3, "jogada": "mao_de_onze", "descricao": "Sobe 1 nível de Mão de Onze" },
+    { "id": "simpatia_fita_bonfim", "nome": "Simpatia da Fita do Bonfim", "preco": 3, "jogada": "cangada", "descricao": "Sobe 1 nível de Cangada" }
+  ]
+}

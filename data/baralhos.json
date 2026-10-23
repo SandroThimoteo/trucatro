@@ -1,0 +1,7 @@
+[
+  { "id": "boteco", "nome": "Baralho do Boteco", "descricao": "Padrão, sem modificadores", "mod": {} },
+  { "id": "gasto", "nome": "Baralho Gasto", "descricao": "30 cartas (sem os 4 e 5), +1 troca", "mod": { "removerRanks": ["4", "5"], "trocasDelta": 1 } },
+  { "id": "malandro", "nome": "Baralho do Malandro", "descricao": "+1 slot de Comparsa, −1 mão por Mesa", "mod": { "slotsComparsaDelta": 1, "maosDelta": -1 } },
+  { "id": "marcado", "nome": "Baralho Marcado", "descricao": "Começa com 3 Cartas Marcadas, adversários mais agressivos", "mod": { "cartasMarcadas": 3, "agressividadeIA": 0.2 } },
+  { "id": "fe", "nome": "Baralho de Fé", "descricao": "Começa com 2 Simpatias aleatórias", "mod": { "simpatiasIniciais": 2 } }
+]

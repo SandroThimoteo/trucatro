@@ -1,0 +1,18 @@
+{
+  "name": "trucatro",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Roguelike deckbuilder com as regras do Truco Paulista",
+  "scripts": {
+    "test": "node --test",
+    "start": "node server.js",
+    "console": "node console.js",
+    "simular": "node tools/simular.js",
+    "build": "node tools/build.js",
+    "testar-banco": "node supabase/teste/testar.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.3.14"
+  }
+}

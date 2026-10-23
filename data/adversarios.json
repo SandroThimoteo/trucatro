@@ -1,0 +1,19 @@
+{
+  "perfis": [
+    {"id": "mesa_bar", "nome": "Novato do Balcão", "agressividade": 0.25, "blefe": 0.06, "coragem": 0.55, "limiarAumentar": 0.85, "limiarPedir": 0.72, "estrategiaCarta": "economica"},
+    {"id": "mesa_fundo", "nome": "Malandro do Fundo", "agressividade": 0.45, "blefe": 0.16, "coragem": 0.45, "limiarAumentar": 0.75, "limiarPedir": 0.62, "estrategiaCarta": "forte_primeiro"},
+    {"id": "chefao_padrao", "nome": "Chefão", "agressividade": 0.55, "blefe": 0.2, "coragem": 0.4, "limiarAumentar": 0.7, "limiarPedir": 0.58, "estrategiaCarta": "economica"},
+    {"id": "rei_do_truco", "nome": "Rei do Truco", "agressividade": 0.8, "blefe": 0.3, "coragem": 0.3, "limiarAumentar": 0.6, "limiarPedir": 0.5, "estrategiaCarta": "economica"},
+    {"id": "classico", "nome": "Parceiro de Boteco", "agressividade": 0.4, "blefe": 0.12, "coragem": 0.45, "limiarAumentar": 0.78, "limiarPedir": 0.62, "estrategiaCarta": "economica"}
+  ],
+  "falas": {
+    "pedir": ["TRUCO, marreco!", "Truco! Vai encarar?", "Truco, ladrão!", "Ó o truco aí!"],
+    "aumentar": ["SEIS, ladrão!", "Nove, que eu tô com a mão boa!", "DOZE! Desce do muro!", "Aumenta que eu pago!"],
+    "aceitar": ["Desce!", "Cai dentro.", "Tô dentro, pode vir.", "Vambora."],
+    "correr": ["Tô fora...", "Corro. Essa não é minha.", "Fica pra próxima.", "Pode levar."],
+    "venceuVaza": ["Essa é minha.", "Hehe.", "Matei!"],
+    "perdeuVaza": ["Sorte de principiante.", "Hmpf.", "Tá bom, tá bom."],
+    "entrada": ["Senta aí.", "Bora jogar."],
+    "derrota": ["Bem jogado."]
+  }
+}

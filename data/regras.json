@@ -1,0 +1,56 @@
+{
+  "truco": {
+    "valores": [1, 3, 6, 9, 12],
+    "penalidadeMaosBlefe": 1,
+    "fugaPontuaMelhorCarta": true
+  },
+  "mesa": {
+    "maos": 4,
+    "trocas": 3,
+    "tamanhoMao": 3,
+    "cartasAdversario": 3,
+    "ultimaMaoDeOnze": true,
+    "valorMaoDeOnze": 3
+  },
+  "bairros": 8,
+  "metas": [
+    [30, 60, 105],
+    [105, 160, 240],
+    [210, 315, 455],
+    [385, 560, 800],
+    [665, 980, 1400],
+    [1120, 1680, 2380],
+    [1900, 2800, 3900],
+    [3150, 4550, 6300]
+  ],
+  "crescimentoInfinito": 1.6,
+  "nomesBairros": ["Vila Operária", "Brás", "Mooca", "Bixiga", "Penha", "Lapa", "Santana", "Centro Velho"],
+  "economia": {
+    "reisIniciais": 4,
+    "recompensaMesa": { "bar": 3, "fundo": 4, "chefao": 5 },
+    "porMaoRestante": 1,
+    "jurosACada": 5,
+    "jurosMax": 5,
+    "rerollBase": 5,
+    "rerollIncremento": 1,
+    "vendaFracao": 0.5
+  },
+  "loja": {
+    "comparsas": 2,
+    "consumiveis": 2,
+    "cartas": 1,
+    "pesosRaridade": { "comum": 64, "incomum": 26, "rara": 9, "lendaria": 1.5 },
+    "precoCarta": 3,
+    "precoCartaMelhorada": 5,
+    "chanceMelhoria": 0.6,
+    "chanceSelo": 0.25
+  },
+  "slots": { "comparsas": 5, "consumiveis": 2 },
+  "promessas": [
+    { "tipo": "reis", "valor": 6, "descricao": "+6 Réis" },
+    { "tipo": "comparsa", "raridade": "comum", "descricao": "Comparsa comum grátis" },
+    { "tipo": "simpatia", "descricao": "Simpatia grátis" },
+    { "tipo": "causo", "descricao": "Causo grátis" }
+  ],
+  "classico": { "pontosVitoria": 12 }
+}

@@ -1,0 +1,1565 @@
+// Camada de interface: lê o estado do Core, desenha as telas e envia comandos.
+
+import { ARQUIVOS_DADOS, montarDados, defConsumivel, perfilDe, falasDe } from '../core/dados.js';
+import { Jogo, TIPOS_MESA, NOME_MESA } from '../core/run.js';
+import { PartidaClassica } from '../core/partida.js';
+import { GameEventBus } from '../core/events.js';
+import { randomSeed } from '../core/rng.js';
+import { RANKS, SUITS, SUIT_NOME } from '../core/cards.js';
+import { valoresJogada } from '../core/scoring.js';
+import { proximoValor } from '../core/truco.js';
+import { novoPerfil, normalizarPerfil, comprarItem, equiparItem, itemEquipado, registrarMesa, registrarFimDeRun } from '../core/perfil.js';
+import { esc, fmt, cartaHTML, versoHTML, slotComparsa, infoBtn, avatarHTML, NOME_RARIDADE, NOME_VALOR } from './componentes.js';
+import { audio } from './audio.js';
+import { detectarConta, entrar, convidado, backupLocal, lerBackupLocal } from './conta.js';
+
+const raiz = document.getElementById('app');
+const reduzido = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const VEL = { ia: reduzido ? 120 : 720, passo: reduzido ? 30 : 230, vaza: reduzido ? 80 : 520, carimbo: reduzido ? 250 : 950, total: reduzido ? 100 : 650 };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const VOZ_JOGADOR = { tom: 1, vel: 1.05 };
+const CLASSICO_PESSOA = 'seu_joaquim';
+
+const app = {
+  dados: null,
+  tela: 'carregando',
+  jogo: null,
+  partida: null,
+  sel: [],
+  ocupado: false,
+  animando: false,
+  modal: null,
+  detalhe: null,
+  fila: [],
+  conta: null, // placar Fichas × Mult da lousa
+  baralhoSel: 'boteco',
+  seed: randomSeed(),
+  resumo: false,
+  falaClassico: null,
+  falaJogador: null,
+  usuario: null, // { conta, backend, temAdmin }
+  loginModo: 'entrar',
+  convite: new URLSearchParams(location.search).get('convite') ?? '',
+  admin: { jogadores: null, convites: null, novos: null },
+  perfil: null,
+  salvoErro: false,
+  bazarCat: 'verso',
+};
+
+// ---------- perfil e salvamento ----------
+
+let timerSalvar = null;
+let salvando = false;
+let pendente = false;
+
+function salvarPerfil() {
+  if (!app.perfil || !app.usuario?.conta) return;
+  app.perfil.atualizadoEm = Date.now();
+  backupLocal(app.usuario.conta, app.perfil);
+  clearTimeout(timerSalvar);
+  timerSalvar = setTimeout(descarregar, 700);
+}
+
+async function descarregar() {
+  clearTimeout(timerSalvar);
+  if (!app.perfil || !app.usuario?.conta) return;
+  if (salvando) { pendente = true; return; }
+  salvando = true;
+  try {
+    const r = await app.usuario.conta.salvar(app.perfil);
+    if (r?.ajustes) aplicarAjustes(r.ajustes);
+    if (app.salvoErro) { app.salvoErro = false; render(); }
+  } catch (e) {
+    console.warn('Falha ao salvar', e);
+    if (!app.salvoErro) { app.salvoErro = true; render(); }
+  } finally {
+    salvando = false;
+    if (pendente) { pendente = false; descarregar(); }
+  }
+}
+addEventListener('pagehide', descarregar);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') descarregar(); });
+
+// O admin mudou Tampinhas/réis enquanto você jogava: o banco devolve os valores novos.
+function aplicarAjustes({ tampinhas, reis }) {
+  const msgs = [];
+  if (tampinhas != null) {
+    app.perfil.tampinhas = tampinhas;
+    msgs.push(`${tampinhas} Tampinhas`);
+  }
+  if (reis != null) {
+    if (app.jogo) {
+      app.jogo.run.reis = reis;
+      app.perfil.save = app.jogo.salvar();
+    } else if (app.perfil.save) {
+      try {
+        const run = JSON.parse(app.perfil.save);
+        run.reis = reis;
+        app.perfil.save = JSON.stringify(run);
+      } catch { /* save estranho: deixa como está */ }
+    }
+    msgs.push(`${reis} réis`);
+  }
+  if (msgs.length) {
+    audio.tocar('tampinha');
+    toast(`O admin ajustou: agora você tem ${msgs.join(' e ')}.`);
+    salvarPerfil();
+    render();
+  }
+}
+
+// Tampinhas de Chefão e recordes, uma vez só por Mesa/run (as marcas ficam no próprio save).
+function sincronizarPerfil() {
+  const r = app.jogo?.run;
+  if (!r || !app.perfil) return;
+  const rm = r.resultadoMesa;
+  if (rm?.venceu && !rm.creditado) {
+    registrarMesa(app.perfil, rm);
+    rm.creditado = true;
+    if (rm.tampinhas) audio.tocar('tampinha');
+  }
+  if ((r.fase === 'derrota' || r.fase === 'vitoria') && !r.registradoNoPerfil) {
+    registrarFimDeRun(app.perfil, r);
+    r.registradoNoPerfil = true;
+  }
+}
+
+function lerSave() { return app.perfil?.save ?? null; }
+function gravarSave() {
+  if (!app.jogo || !app.perfil) return;
+  sincronizarPerfil();
+  app.perfil.save = app.jogo.salvar();
+  salvarPerfil();
+}
+function apagarSave() {
+  if (!app.perfil) return;
+  app.perfil.save = null;
+  salvarPerfil();
+}
+function saveContinuavel() {
+  const s = lerSave();
+  if (!s) return false;
+  try { return !['derrota', 'vitoria'].includes(JSON.parse(s).fase); } catch { return false; }
+}
+
+async function abrirConta(conta) {
+  app.usuario = { ...app.usuario, conta };
+  app.tela = 'carregando';
+  render();
+  let remoto = null;
+  try { remoto = await conta.carregar(); } catch (e) { toast(`Não deu para carregar o progresso: ${e.message}`); }
+  const backup = lerBackupLocal(conta);
+  let inicial = (backup?.atualizadoEm ?? 0) > (remoto?.atualizadoEm ?? 0) ? backup : remoto;
+  if (!inicial && conta.tipo !== 'local') {
+    // Primeira vez nesta conta: leva junto o que foi jogado sem conta neste aparelho
+    inicial = await convidado().carregar();
+    if (inicial) toast('O progresso deste aparelho foi para a sua conta.');
+  }
+  app.perfil = inicial ? normalizarPerfil(app.dados, inicial) : novoPerfil(app.dados);
+  audio.configurar(app.perfil.opcoes);
+  aplicarVisual();
+  app.tela = 'menu';
+  salvarPerfil();
+  render();
+}
+
+// Visual comprado no Bazar: classes no body que mudam variáveis de CSS.
+function aplicarVisual() {
+  const b = document.body;
+  for (const c of [...b.classList]) if (/^(verso|frente|toalha)-/.test(c)) b.classList.remove(c);
+  if (!app.perfil) return;
+  for (const cat of ['verso', 'frente', 'toalha']) b.classList.add(itemEquipado(app.dados, app.perfil, cat).classe);
+}
+
+const equipado = (cat) => itemEquipado(app.dados, app.perfil, cat);
+const pick = (lista) => lista[Math.floor(Math.random() * lista.length)];
+
+// ---------- efeitos visuais ----------
+
+function toast(msg) {
+  document.querySelector('.toast')?.remove();
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.setAttribute('role', 'status');
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2800);
+}
+
+async function carimbo(texto, sub = '') {
+  const el = document.createElement('div');
+  el.className = 'carimbo';
+  el.innerHTML = `<span>${esc(texto)}${sub ? `<small>${esc(sub)}</small>` : ''}</span>`;
+  document.body.appendChild(el);
+  document.querySelector('.toalha')?.classList.add('treme');
+  audio.tocar('carimbo');
+  await sleep(VEL.carimbo);
+  el.remove();
+  document.querySelector('.toalha')?.classList.remove('treme');
+}
+
+function pular(uid) {
+  const el = document.querySelector(`.slot[data-uid="${uid}"]`);
+  if (!el) return;
+  el.classList.remove('pulo');
+  void el.offsetWidth;
+  el.classList.add('pulo');
+}
+
+function desenharConta() {
+  const el = document.getElementById('conta');
+  if (el) el.outerHTML = contaHTML();
+}
+
+async function animarVaza(ev) {
+  let i = 0;
+  for (const p of ev.passos) {
+    app.conta = { jogada: app.dados.jogadas[ev.jogada].nome, fichas: p.fichas, mult: p.mult, origem: legendaPasso(p), total: null };
+    desenharConta();
+    if (p.comparsa) pular(p.comparsa);
+    audio.tocar('ponto', i++);
+    document.querySelector(`#conta .caixa.${p.tipo === 'fichas' ? 'f' : 'm'}`)?.classList.add('pop');
+    await sleep(VEL.passo);
+  }
+  app.conta = { ...app.conta, total: ev.total, origem: ev.total === 0 ? 'Não pontuou' : 'Vaza guardada' };
+  desenharConta();
+  document.querySelector('#conta .total')?.classList.add('pop');
+  await sleep(VEL.total);
+}
+
+function legendaPasso(p) {
+  if (p.tipo === 'fichas') return `+${p.valor} Fichas · ${p.origem}`;
+  if (p.tipo === 'mult') return `+${p.valor} Mult · ${p.origem}`;
+  if (p.tipo === 'xmult') return `×${p.valor} Mult · ${p.origem}`;
+  if (p.tipo === 'anula') return `${p.origem}: não pontua`;
+  if (p.tipo === 'metade') return `${p.origem}: vale ${p.valor === 0.5 ? 'metade' : `×${p.valor}`}`;
+  return p.origem;
+}
+
+async function animarMao(ev) {
+  let i = 0;
+  for (const p of ev.passos) {
+    if (p.comparsa) pular(p.comparsa);
+    audio.tocar('ponto', 4 + i++);
+    app.conta = { jogada: 'Fim da mão', fichas: null, mult: null, origem: p.tipo === 'x' ? `×${p.valor} · ${p.origem}` : `+${fmt(p.valor)} · ${p.origem}`, total: p.total };
+    desenharConta();
+    document.querySelector('#conta .total')?.classList.add('pop');
+    await sleep(VEL.passo * 1.6);
+  }
+}
+
+function vozDe(pessoaId) {
+  return app.dados.personagensPorId[pessoaId]?.voz ?? {};
+}
+
+function falarJogador(texto) {
+  app.falaJogador = texto;
+  audio.falar(texto, VOZ_JOGADOR);
+  render();
+}
+
+async function tocarFila() {
+  app.animando = true;
+  while (app.fila.length) {
+    const ev = app.fila.shift();
+    const meu = ev.jogador === 0;
+    if (ev.tipo === 'OnFala') {
+      audio.falar(ev.texto, vozDe(ev.pessoa));
+    } else if (ev.tipo === 'OnMaoDistribuida') {
+      audio.tocar('embaralhar');
+    } else if (ev.tipo === 'OnCartaJogada') {
+      audio.tocar('carta');
+    } else if (ev.tipo === 'OnTrucoPedido') {
+      audio.tocar('truco');
+      const grito = equipado('falaTruco');
+      if (meu) falarJogador(pick(grito.falas.pedir));
+      const texto = meu && ev.valor === 3 ? grito.carimbo : NOME_VALOR[ev.valor] ?? 'TRUCO!';
+      await carimbo(texto, meu ? 'você pediu' : 'o adversário pediu');
+    } else if (ev.tipo === 'OnTrucoRespondido') {
+      if (ev.resposta === 'aumentar') {
+        audio.tocar('truco');
+        if (meu) falarJogador(pick(equipado('falaTruco').falas.aumentar));
+        await carimbo(NOME_VALOR[ev.valor], meu ? 'você aumentou' : 'o adversário aumentou');
+      } else if (ev.resposta === 'correr') {
+        await carimbo('CORREU!', meu ? 'você correu' : 'o adversário correu');
+      } else if (!meu) toast('O adversário aceitou: desce!');
+    } else if (ev.tipo === 'OnVazaResolvida') {
+      audio.tocar(ev.vaza.vencedor === 0 ? 'vazaGanha' : ev.vaza.vencedor === 1 ? 'vazaPerdida' : 'clique');
+      await sleep(VEL.vaza);
+    } else if (ev.tipo === 'OnVazaPontuada') {
+      await animarVaza(ev);
+    } else if (ev.tipo === 'MaoPontuada' || (ev.tipo === 'OnMaoFinalizada' && app.tela === 'classico')) {
+      const venceu = ev.tipo === 'MaoPontuada' ? ev.venceu : ev.vencedor === 0;
+      const perdeu = ev.tipo === 'MaoPontuada' ? ev.vencedor === 1 : ev.vencedor === 1;
+      if (venceu) {
+        audio.tocar('vitoria');
+        falarJogador(pick(equipado('falaVitoria').falas));
+        if (ev.tipo === 'MaoPontuada') await animarMao(ev);
+      } else if (perdeu) {
+        audio.tocar('derrota');
+        falarJogador(pick(equipado('falaDerrota').falas));
+      }
+    } else if (ev.tipo === 'OnMesaFinalizada' && ev.venceu) {
+      audio.tocar('moeda');
+      if (ev.fala) audio.falar(ev.fala, vozDe(ev.pessoaId));
+    }
+  }
+  app.animando = false;
+}
+
+// Executa um comando do jogador e depois deixa a IA agir com calma.
+async function executar(fn, { limparSel = true } = {}) {
+  if (app.ocupado) return;
+  try {
+    fn();
+  } catch (e) {
+    toast(e.message);
+    render();
+    return;
+  }
+  if (limparSel) app.sel = [];
+  app.falaJogador = null;
+  app.ocupado = true;
+  try {
+    coletarClassico();
+    render();
+    await tocarFila();
+    while (app.jogo && app.tela === 'jogo' && app.jogo.iaPrecisaAgir()) {
+      render();
+      await sleep(VEL.ia);
+      app.jogo.passoIA();
+      render();
+      await tocarFila();
+    }
+    while (app.partida && app.tela === 'classico' && app.partida.iaPrecisaAgir()) {
+      render();
+      await sleep(VEL.ia);
+      const acao = app.partida.passoIA();
+      falarClassico(acao);
+      coletarClassico();
+      render();
+      await tocarFila();
+    }
+  } catch (e) {
+    console.error(e);
+    toast(e.message);
+  } finally {
+    app.ocupado = false;
+    app.animando = false;
+    if (app.tela === 'jogo') gravarSave();
+    render();
+  }
+}
+
+function coletarClassico() {
+  if (app.tela !== 'classico' || !app.partida?.ultimosEventos) return;
+  app.fila.push(...app.partida.ultimosEventos);
+  app.partida.ultimosEventos = null;
+}
+
+function falarClassico(acao) {
+  const pessoa = app.dados.personagensPorId[CLASSICO_PESSOA];
+  let momento = null;
+  if (acao.tipo === 'pedir') momento = 'pedir';
+  else if (acao.tipo === 'responder') momento = acao.resposta;
+  app.falaClassico = momento ? pick(falasDe(app.dados, pessoa, momento)) : null;
+  if (app.falaClassico) app.fila.unshift({ tipo: 'OnFala', texto: app.falaClassico, pessoa: pessoa.id });
+}
+
+// ---------- ações ----------
+
+function novaRunCom(seed, baralhoId) {
+  const bus = new GameEventBus();
+  bus.on('*', (ev) => app.fila.push(ev));
+  app.jogo = Jogo.novaRun(app.dados, { seed, baralhoId }, bus);
+  app.tela = 'jogo';
+  app.resumo = false;
+  app.conta = null;
+  app.sel = [];
+  gravarSave();
+}
+
+const acoes = {
+  irMenu() { app.tela = 'menu'; app.modal = null; },
+  irSelecao() { app.tela = 'selecao'; app.seed = randomSeed(); },
+  irColecao() { app.tela = 'colecao'; },
+  irBazar() { app.tela = 'bazar'; },
+  irLogin() { app.tela = 'login'; },
+  escolherBaralho(id) { app.baralhoSel = id; },
+  novaSeed() { app.seed = randomSeed(); },
+  comecarRun() {
+    const input = document.getElementById('seed-input');
+    const seed = (input?.value || app.seed).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 16) || randomSeed();
+    novaRunCom(seed, app.baralhoSel);
+  },
+  continuar() {
+    const s = lerSave();
+    if (!s) return;
+    const bus = new GameEventBus();
+    bus.on('*', (ev) => app.fila.push(ev));
+    app.jogo = Jogo.carregar(app.dados, s, bus);
+    app.tela = 'jogo';
+    app.resumo = false;
+    executar(() => {});
+  },
+  classico() {
+    const pessoa = app.dados.personagensPorId[CLASSICO_PESSOA];
+    app.partida = new PartidaClassica({ seed: randomSeed(), perfil: perfilDe(app.dados, pessoa), pontosVitoria: app.dados.regras.classico.pontosVitoria });
+    app.tela = 'classico';
+    app.falaClassico = pick(falasDe(app.dados, pessoa, 'entrada'));
+    app.sel = [];
+    app.fila.push({ tipo: 'OnFala', texto: app.falaClassico, pessoa: pessoa.id });
+    executar(() => {});
+  },
+  modal(nome) { app.modal = nome; },
+  fecharModal() { app.modal = null; app.detalhe = null; },
+  detalhe(arg) {
+    const i = arg.indexOf(':');
+    app.detalhe = { tipo: arg.slice(0, i), id: arg.slice(i + 1) };
+    app.modal = 'detalhe';
+  },
+  mudo() {
+    app.perfil.opcoes.mudo = !app.perfil.opcoes.mudo;
+    audio.configurar(app.perfil.opcoes);
+    salvarPerfil();
+  },
+
+  // conta
+  async entrar() { await fazerLogin(app.loginModo === 'criar'); },
+  loginModo(m) { app.loginModo = m; },
+  convidado() {
+    try { localStorage.setItem('trucatro.convidado', '1'); } catch { /* ignora */ }
+    abrirConta(convidado());
+  },
+  async sairConta() {
+    await descarregar();
+    await app.usuario.conta.sair?.();
+    app.perfil = null;
+    app.jogo = null;
+    app.usuario = { ...app.usuario, conta: null };
+    app.admin = { jogadores: null, convites: null, novos: null };
+    try { localStorage.removeItem('trucatro.convidado'); } catch { /* ignora */ }
+    aplicarVisual();
+    app.tela = 'login';
+    app.modal = null;
+    render();
+  },
+
+  // admin
+  irAdmin() { app.tela = 'admin'; carregarAdmin(); },
+  async criarConvites() {
+    const qtd = Number(document.getElementById('adm-qtd')?.value);
+    const obs = document.getElementById('adm-obs')?.value ?? '';
+    await acaoAdmin(async (adm) => {
+      app.admin.novos = await adm.criarConvites(qtd, obs);
+      toast(`${app.admin.novos.length} convite${app.admin.novos.length > 1 ? 's' : ''} criado${app.admin.novos.length > 1 ? 's' : ''}`);
+    });
+  },
+  async apagarConvite(codigo) {
+    await acaoAdmin(async (adm) => { await adm.apagarConvite(codigo); toast('Convite apagado'); });
+  },
+  async salvarJogador(nome) {
+    const linha = document.querySelector(`[data-jogador="${CSS.escape(nome)}"]`);
+    const ler = (campo) => {
+      const v = linha?.querySelector(`[data-campo="${campo}"]`)?.value.trim();
+      return v === '' || v == null ? null : Number(v);
+    };
+    const tampinhas = ler('tampinhas');
+    const reis = ler('reis');
+    if ([tampinhas, reis].some((v) => v != null && (!Number.isInteger(v) || v < 0))) return toast('Use números inteiros a partir de 0');
+    await acaoAdmin(async (adm) => {
+      await adm.definir(nome, tampinhas, reis);
+      // A própria conta do admin: aplica já, sem esperar o próximo salvamento
+      if (nome.toLowerCase() === app.usuario.conta.nome.toLowerCase()) aplicarAjustes({ tampinhas, reis: app.jogo || app.perfil.save ? reis : null });
+      toast(`${nome} atualizado`);
+    });
+  },
+  async copiar(texto) {
+    try {
+      await navigator.clipboard.writeText(texto);
+      toast('Copiado!');
+    } catch { toast('Não deu para copiar: selecione o texto e copie'); }
+  },
+
+  // bazar
+  bazarCat(id) { app.bazarCat = id; },
+  comprarBazar(id) {
+    try {
+      comprarItem(app.dados, app.perfil, id);
+      audio.tocar('tampinha');
+      toast(`${app.dados.bazarPorId[id].nome}: comprado e equipado!`);
+      aplicarVisual();
+      salvarPerfil();
+    } catch (e) { toast(e.message); }
+  },
+  equiparBazar(id) {
+    equiparItem(app.dados, app.perfil, id);
+    audio.tocar('selecionar');
+    aplicarVisual();
+    salvarPerfil();
+  },
+  ouvir(id) {
+    const item = app.dados.bazarPorId[id];
+    const texto = item.categoria === 'falaTruco' ? item.falas.pedir[0] : item.falas[0];
+    audio.falar(texto, VOZ_JOGADOR);
+    if (!audio.temVoz()) toast('Este navegador não tem voz sintetizada');
+  },
+
+  // mapa
+  sentar() { executar(() => app.jogo.iniciarMesa()); },
+  pularMesa() { executar(() => app.jogo.pularMesa()); },
+
+  // mesa
+  carta(id) {
+    if (app.tela === 'classico') return acaoCartaClassico(id);
+    const j = app.jogo;
+    const rd = j.rodada;
+    if (!rd || rd.fase === 'fim' || rd.fase === 'vira') return;
+    const st = rd.mao;
+    const podeJogar = rd.fase === 'jogo' ? st.vez === 0 && !st.pedido : rd.iniciante === 0;
+    const i = app.sel.indexOf(id);
+    if (i >= 0) {
+      if (app.sel.length === 1 && podeJogar) return executar(() => j.jogarCarta(id));
+      app.sel.splice(i, 1);
+    } else if (rd.fase === 'jogo') {
+      app.sel = [id];
+    } else {
+      app.sel.push(id);
+    }
+    audio.tocar('selecionar');
+  },
+  jogar() {
+    if (app.tela === 'classico') return executar(() => app.partida.jogar(app.sel[0]));
+    if (app.sel.length !== 1) return toast('Selecione uma carta');
+    executar(() => app.jogo.jogarCarta(app.sel[0]));
+  },
+  trocar() { audio.tocar('embaralhar'); executar(() => app.jogo.trocar([...app.sel])); },
+  abrir() { executar(() => app.jogo.comecarRodada()); },
+  truco() {
+    if (app.tela === 'classico') return executar(() => app.partida.truco(), { limparSel: false });
+    executar(() => app.jogo.pedirTruco(), { limparSel: false });
+  },
+  responder(r) {
+    if (app.tela === 'classico') return executar(() => app.partida.responder(r), { limparSel: false });
+    executar(() => app.jogo.responderTruco(r), { limparSel: false });
+  },
+  escolherVira(i) { executar(() => app.jogo.escolherVira(Number(i))); },
+  benzer() { executar(() => app.jogo.benzer(), { limparSel: false }); },
+  proximaMao() {
+    app.conta = null;
+    executar(() => app.jogo.proximaMao());
+  },
+  usar(idx) {
+    const j = app.jogo;
+    const item = j.run.consumiveis[Number(idx)];
+    const def = defConsumivel(app.dados, item);
+    executar(() => {
+      j.usarConsumivel(Number(idx), [...app.sel]);
+      toast(item.tipo === 'simpatia' ? `${app.dados.jogadas[def.jogada].nome} subiu de nível!` : `${def.nome} usado`);
+    });
+  },
+  descartarConsumivel(idx) { executar(() => app.jogo.descartarConsumivel(Number(idx))); },
+  irBoteco() { app.conta = null; executar(() => app.jogo.irAoBoteco()); },
+  verResumo() { app.resumo = true; },
+  continuarInfinito() { app.resumo = false; executar(() => app.jogo.continuarInfinito()); },
+
+  // boteco
+  comprar(i) { audio.tocar('moeda'); executar(() => app.jogo.comprar(Number(i))); },
+  vender(uid) { audio.tocar('moeda'); executar(() => app.jogo.venderComparsa(Number(uid))); },
+  mover(arg) {
+    const [uid, dir] = arg.split(':').map(Number);
+    executar(() => app.jogo.moverComparsa(uid, dir));
+  },
+  reroll() { audio.tocar('embaralhar'); executar(() => app.jogo.reroll()); },
+  seguir() { executar(() => app.jogo.sairDoBoteco()); },
+  abandonar() {
+    apagarSave();
+    app.jogo = null;
+    app.tela = 'menu';
+    app.modal = null;
+  },
+
+  // clássico
+  decidirOnze(arg) { executar(() => app.partida.decidirOnze(0, arg === 'jogar')); },
+  proximaMaoClassico() { app.falaClassico = null; executar(() => app.partida.proximaMao()); },
+};
+
+async function fazerLogin(criar) {
+  const nome = document.getElementById('login-nome')?.value ?? '';
+  const senha = document.getElementById('login-senha')?.value ?? '';
+  const convite = document.getElementById('login-convite')?.value ?? app.convite;
+  if (app.ocupado) return;
+  app.ocupado = true;
+  render();
+  try {
+    const conta = await entrar(app.usuario.backend, { nome, senha, convite, criar });
+    if (criar && app.convite) history.replaceState(null, '', location.pathname);
+    app.ocupado = false;
+    toast(criar ? `Conta criada. Bem-vindo, ${conta.nome}!` : `Bem-vindo de volta, ${conta.nome}!`);
+    await abrirConta(conta);
+  } catch (e) {
+    app.ocupado = false;
+    toast(e.message);
+    render();
+    document.getElementById('login-senha')?.focus();
+  }
+}
+
+// ---------- painel do admin ----------
+
+function linkConvite(codigo) {
+  return `${location.origin}${location.pathname}?convite=${encodeURIComponent(codigo)}`;
+}
+
+async function acaoAdmin(fn) {
+  const adm = app.usuario?.conta?.adm;
+  if (!adm || app.ocupado) return;
+  app.ocupado = true;
+  render();
+  try {
+    await fn(adm);
+    const [jogadores, convites] = await Promise.all([adm.jogadores(), adm.convites()]);
+    Object.assign(app.admin, { jogadores, convites });
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    app.ocupado = false;
+    render();
+  }
+}
+
+function carregarAdmin() {
+  acaoAdmin(async () => {});
+}
+
+function acaoCartaClassico(id) {
+  const p = app.partida;
+  if (p.fase !== 'jogo' || p.mao.vez !== 0 || p.mao.pedido) return;
+  if (app.sel[0] === id) return executar(() => p.jogar(id));
+  app.sel = [id];
+  audio.tocar('selecionar');
+}
+
+raiz.addEventListener('click', (e) => {
+  if (e.target.matches('[data-fundo-modal]')) {
+    app.modal = null;
+    app.detalhe = null;
+    render();
+    return;
+  }
+  const el = e.target.closest('[data-acao]');
+  if (!el || el.disabled || app.ocupado) return;
+  const fn = acoes[el.dataset.acao];
+  if (!fn) return;
+  if (el.tagName === 'BUTTON' && !el.classList.contains('carta')) audio.tocar('clique');
+  const resultado = fn(el.dataset.arg);
+  if (!(resultado instanceof Promise)) render();
+});
+
+raiz.addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (e.target.id === 'form-login') acoes.entrar();
+});
+
+// Controles de volume: atualizam sem redesenhar a tela
+raiz.addEventListener('input', (e) => {
+  const chave = e.target.dataset.opcao;
+  if (!chave || !app.perfil) return;
+  app.perfil.opcoes[chave] = e.target.type === 'checkbox' ? e.target.checked : Number(e.target.value);
+  audio.configurar(app.perfil.opcoes);
+  salvarPerfil();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && app.modal) {
+    app.modal = null;
+    app.detalhe = null;
+    render();
+  }
+});
+
+// O navegador só libera som depois de um toque ou tecla
+const destravar = () => audio.destravar();
+document.addEventListener('pointerdown', destravar);
+document.addEventListener('keydown', destravar);
+
+// ---------- telas ----------
+
+function render() {
+  document.body.classList.toggle('ocupado', app.ocupado);
+  let html = '';
+  if (!app.dados || app.tela === 'carregando') html = '<section class="menu"><h1 class="logo">TRUCATRO</h1><p class="rotulo">Embaralhando...</p></section>';
+  else if (app.tela === 'login') html = telaLogin();
+  else if (app.tela === 'menu') html = telaMenu();
+  else if (app.tela === 'selecao') html = telaSelecao();
+  else if (app.tela === 'colecao') html = telaColecao();
+  else if (app.tela === 'bazar') html = telaBazar();
+  else if (app.tela === 'admin') html = telaAdmin();
+  else if (app.tela === 'classico') html = telaClassico();
+  else if (app.tela === 'jogo') html = telaJogo();
+  const foco = document.activeElement?.id;
+  const valores = {};
+  for (const id of ['login-nome', 'login-senha', 'login-convite', 'seed-input', 'adm-qtd', 'adm-obs']) {
+    const el = document.getElementById(id);
+    if (el) valores[id] = el.value;
+  }
+  raiz.innerHTML = html + botaoSom() + modalHTML();
+  for (const [id, v] of Object.entries(valores)) {
+    const el = document.getElementById(id);
+    if (el) el.value = v;
+  }
+  if (foco) document.getElementById(foco)?.focus();
+}
+
+function botaoSom() {
+  if (!app.perfil) return '';
+  const mudo = app.perfil.opcoes.mudo;
+  return `<div class="som-flutuante">
+    <button class="btn fantasma peq acao" data-acao="mudo" aria-pressed="${mudo}" aria-label="${mudo ? 'Ligar o som' : 'Desligar o som'}">${mudo ? '🔇' : '🔊'}</button>
+    <button class="btn fantasma peq acao" data-acao="modal" data-arg="som">Som</button>
+  </div>`;
+}
+
+function chipConta() {
+  const u = app.usuario;
+  const p = app.perfil;
+  const moeda = `<span class="tampinhas" title="${esc(app.dados.bazar.moeda.descricao)}"><i class="tampa" aria-hidden="true"></i>${p.tampinhas} Tampinhas</span>`;
+  let quem;
+  if (u.conta.tipo === 'claude') quem = `<span>Conta do Claude: <b>${esc(u.conta.nome)}</b></span>`;
+  else if (u.conta.tipo === 'servidor' || u.conta.tipo === 'online') quem = `<span>Jogador: <b>${esc(u.conta.nome)}</b>${u.conta.admin ? ' <span class="selo-admin">admin</span>' : ''}</span><button class="btn fantasma peq acao" data-acao="sairConta">Sair</button>`;
+  else if (u.backend) quem = '<span>Sem conta (salva só neste aparelho)</span><button class="btn amarelo peq acao" data-acao="irLogin">Entrar</button>';
+  else quem = '<span>Progresso salvo neste aparelho</span>';
+  return `<div class="chip-conta">${quem}${moeda}${app.salvoErro ? '<span class="aviso">Sem conexão: salvo só aqui por enquanto</span>' : ''}</div>`;
+}
+
+function telaLogin() {
+  const b = app.usuario?.backend;
+  const criar = app.loginModo === 'criar';
+  const primeira = b && app.usuario.temAdmin === false;
+  const pedeConvite = criar && b?.exigeConvite && !primeira;
+  return `<section class="menu">
+    <h1 class="logo">TRUCATRO<small>${criar ? 'Crie sua conta para jogar' : 'Entre para jogar e guardar seu progresso'}</small></h1>
+    <form class="lousa login" id="form-login" autocomplete="on">
+      <div class="botoes abas-login">
+        <button class="btn peq ${criar ? 'fantasma' : 'amarelo'} acao" type="button" data-acao="loginModo" data-arg="entrar" aria-pressed="${!criar}">Entrar</button>
+        <button class="btn peq ${criar ? 'amarelo' : 'fantasma'} acao" type="button" data-acao="loginModo" data-arg="criar" aria-pressed="${criar}">Criar conta</button>
+      </div>
+      ${primeira && criar ? '<p class="aviso-login">Ainda não existe nenhuma conta: a primeira criada vira <b>admin</b> e não precisa de convite.</p>' : ''}
+      <label class="rotulo" for="login-nome">Nome</label>
+      <input id="login-nome" name="username" autocomplete="username" maxlength="20" required>
+      <label class="rotulo" for="login-senha">Senha${criar ? ' (mínimo 6)' : ''}</label>
+      <input id="login-senha" name="password" type="password" autocomplete="${criar ? 'new-password' : 'current-password'}" maxlength="100" required>
+      ${pedeConvite ? `<label class="rotulo" for="login-convite">Código do convite</label>
+      <input id="login-convite" name="convite" value="${esc(app.convite)}" autocomplete="off" spellcheck="false" maxlength="9" placeholder="XXXX-XXXX" required>` : ''}
+      <div class="botoes"><button class="btn amarelo" type="submit">${criar ? 'Criar conta e jogar' : 'Entrar'}</button></div>
+      <p class="rotulo">${pedeConvite ? 'Para criar conta você precisa de um convite do admin.' : 'A conta guarda a run em andamento, suas Tampinhas e o que você comprou no Bazar. Se sair no meio de uma Mesa, continua de onde parou.'}</p>
+      ${b?.exigeConta ? '' : '<button class="btn fantasma peq acao" type="button" data-acao="convidado">Jogar sem conta</button>'}
+    </form>
+  </section>`;
+}
+
+function telaMenu() {
+  const leque = [
+    { id: 'm1', rank: '4', suit: 'paus' }, { id: 'm2', rank: '7', suit: 'copas' },
+    { id: 'm3', rank: 'A', suit: 'espadas' }, { id: 'm4', rank: '7', suit: 'ouros' },
+  ];
+  return `${chipConta()}
+  <section class="menu">
+    <div class="leque">${leque.map((c) => cartaHTML(c, { estatica: true })).join('')}</div>
+    <h1 class="logo">TRUCATRO<small>Truco Paulista de mesa em mesa, até o Rei do Truco</small></h1>
+    <div class="botoes">
+      ${saveContinuavel() ? '<button class="btn amarelo acao" data-acao="continuar">Continuar run</button>' : ''}
+      <button class="btn truco acao" data-acao="irSelecao">Nova run</button>
+      <button class="btn acao" data-acao="classico">Truco clássico</button>
+      <button class="btn acao" data-acao="irBazar">Bazar das Tampinhas</button>
+      ${app.usuario.conta.admin ? '<button class="btn amarelo acao" data-acao="irAdmin">Painel do admin</button>' : ''}
+      <button class="btn fantasma acao" data-acao="irColecao">Coleção</button>
+      <button class="btn fantasma acao" data-acao="modal" data-arg="ajuda">Como jogar</button>
+    </div>
+    ${app.perfil.recordes.runs ? `<p class="rotulo">Runs: ${app.perfil.recordes.runs} · Vitórias: ${app.perfil.recordes.vitorias} · Melhor bairro: ${app.perfil.recordes.melhorBairro}</p>` : ''}
+  </section>`;
+}
+
+function telaSelecao() {
+  const fichas = app.dados.baralhos.map((b) => `
+    <button class="ficha ${b.id === app.baralhoSel ? 'escolhida' : ''}" data-acao="escolherBaralho" data-arg="${b.id}" style="text-align:left;border:0;cursor:pointer">
+      <h3>${esc(b.nome)}</h3><p>${esc(b.descricao)}</p>
+    </button>`).join('');
+  return `<div class="topo"><h2>Escolha o baralho</h2><button class="btn fantasma acao" data-acao="irMenu">Voltar</button></div>
+    <div class="grade">${fichas}</div>
+    <div class="placa" style="margin-top:18px;display:grid;gap:12px">
+      <div class="campo"><label class="rotulo" for="seed-input" style="color:var(--papel)">Seed</label>
+        <input id="seed-input" value="${esc(app.seed)}" maxlength="16" autocomplete="off" spellcheck="false">
+        <button class="btn fantasma peq acao" data-acao="novaSeed">Sortear outra</button></div>
+      <div class="botoes"><button class="btn truco acao" data-acao="comecarRun">Começar run</button></div>
+    </div>`;
+}
+
+function fichaPessoa(p) {
+  return `<div class="ficha">
+    ${infoBtn('pessoa', p.id, p.nome)}
+    <div class="pessoa-cab">${avatarHTML(p)}<div><h3>${esc(p.nome)}</h3><small>${esc(p.titulo)}</small></div></div>
+    <p class="manha"><b>Manha:</b> ${esc(p.regra)}</p>
+    ${p.drop ? `<p class="rotulo-tinta">Deixa cair ${p.drop}+ Tampinhas</p>` : ''}
+  </div>`;
+}
+
+function telaColecao() {
+  const d = app.dados;
+  const comps = d.comparsas.map((c) => `<div class="ficha">${infoBtn('comparsa', c.id, c.nome)}<span class="raridade r-${c.raridade}">${NOME_RARIDADE[c.raridade]}</span><h3>${esc(c.nome)}</h3><p>${esc(c.descricao)}</p><div class="rodape"><span class="preco">${c.preco} réis</span></div></div>`).join('');
+  const causos = d.causos.map((c) => `<div class="ficha">${infoBtn('causo', c.id, c.nome)}<span class="raridade" style="background:#8a5a2b">Causo</span><h3>${esc(c.nome)}</h3><p>${esc(c.descricao)}</p></div>`).join('');
+  const simps = d.simpatias.map((c) => `<div class="ficha">${infoBtn('simpatia', c.id, c.nome)}<span class="raridade" style="background:#5c4a8a">Simpatia</span><h3>${esc(c.nome)}</h3><p>${esc(c.descricao)}</p></div>`).join('');
+  const melhorias = [
+    ...Object.entries(d.cartas.melhorias).map(([id, m]) => `<div class="ficha">${infoBtn('melhoria', id, m.nome)}<span class="raridade" style="background:#2b5a7a">Melhoria</span><h3>${esc(m.nome)}</h3><p>${esc(m.descricao)}</p></div>`),
+    ...Object.entries(d.cartas.selos).map(([id, s]) => `<div class="ficha">${infoBtn('selo', id, s.nome)}<span class="raridade" style="background:#2b5a7a">Selo</span><h3>${esc(s.nome)}</h3><p>${esc(s.descricao)}</p></div>`),
+  ].join('');
+  const grupo = (tipo) => d.personagens.filter((p) => p.tipo === tipo).map(fichaPessoa).join('');
+  return `<div class="topo"><h2>Coleção</h2><button class="btn fantasma acao" data-acao="irMenu">Voltar</button></div>
+    <p class="rotulo" style="margin-top:-8px">Toque no <span class="info-exemplo">i</span> de qualquer item para ver como ele funciona, com exemplo.</p>
+    <div style="display:grid;gap:22px;margin-top:12px">
+      <section><h3 class="secao">Comparsas</h3><div class="grade">${comps}</div></section>
+      <section><h3 class="secao">Causos</h3><div class="grade">${causos}</div></section>
+      <section><h3 class="secao">Simpatias</h3><div class="grade">${simps}</div></section>
+      <section><h3 class="secao">Melhorias e selos de carta</h3><div class="grade">${melhorias}</div></section>
+      <section><h3 class="secao">Mesas do Bar</h3><div class="grade">${grupo('bar')}</div></section>
+      <section><h3 class="secao">Mesas do Fundo</h3><div class="grade">${grupo('fundo')}</div></section>
+      <section><h3 class="secao">Chefões</h3><div class="grade">${grupo('chefao')}</div></section>
+      <section class="lousa"><h2 style="margin-bottom:8px">Jogadas</h2>${tabelaJogadas(null)}</section>
+    </div>`;
+}
+
+function tabelaJogadas(niveis) {
+  const linhas = app.dados.jogadasLista.map((j) => {
+    const v = valoresJogada(app.dados, niveis, j.id);
+    const extra = j.id === 'cangada' ? `+${v.multProxima} Mult na próxima` : `${v.fichas} × ${v.mult}`;
+    return `<tr><td>${esc(j.nome)}</td><td class="n">${niveis?.[j.id] ?? 1}</td><td class="n">${extra}</td><td style="font-size:0.82rem;color:var(--giz-fraco)">${esc(j.descricao)}</td></tr>`;
+  }).join('');
+  return `<div class="rolagem"><table class="tabela"><thead><tr><th>Jogada</th><th>Nível</th><th>Fichas × Mult</th><th>Quando</th></tr></thead><tbody>${linhas}</tbody></table></div>`;
+}
+
+// ---------- bazar ----------
+
+function previewItem(item) {
+  if (item.categoria === 'verso') return `<div class="${item.classe} preview">${versoHTML({ mini: false })}</div>`;
+  if (item.categoria === 'frente') return `<div class="${item.classe} preview">${cartaHTML({ id: 'p1', rank: 'A', suit: 'espadas' }, { estatica: true })}${cartaHTML({ id: 'p2', rank: '7', suit: 'copas' }, { estatica: true })}</div>`;
+  if (item.categoria === 'toalha') return `<div class="${item.classe} preview"><div class="toalha amostra"></div></div>`;
+  if (item.categoria === 'falaTruco') return `<div class="preview"><span class="carimbo-mini">${esc(item.carimbo)}</span><p class="citacao">“${esc(item.falas.pedir[0])}”</p></div>`;
+  return `<div class="preview"><p class="citacao">${item.falas.map((f) => `“${esc(f)}”`).join('<br>')}</p></div>`;
+}
+
+function telaBazar() {
+  const d = app.dados;
+  const p = app.perfil;
+  const cat = d.bazar.categorias.find((c) => c.id === app.bazarCat) ?? d.bazar.categorias[0];
+  const abas = d.bazar.categorias.map((c) => `<button class="btn peq ${c.id === cat.id ? 'amarelo' : 'fantasma'} acao" data-acao="bazarCat" data-arg="${c.id}" aria-pressed="${c.id === cat.id}">${esc(c.nome)}</button>`).join('');
+  const itens = d.bazar.itens.filter((i) => i.categoria === cat.id).map((item) => {
+    const tem = p.compras.includes(item.id);
+    const usando = p.equipado[item.categoria] === item.id;
+    let botao;
+    if (usando) botao = '<span class="equipado">Usando</span>';
+    else if (tem) botao = `<button class="btn peq acao" data-acao="equiparBazar" data-arg="${item.id}">Usar</button>`;
+    else botao = `<button class="btn amarelo peq acao" data-acao="comprarBazar" data-arg="${item.id}" ${p.tampinhas < item.preco ? 'disabled' : ''}>Comprar</button>`;
+    const ouvir = item.falas ? `<button class="btn fantasma-escuro peq acao" data-acao="ouvir" data-arg="${item.id}">Ouvir</button>` : '';
+    return `<div class="ficha item-bazar ${usando ? 'escolhida' : ''}">
+      ${previewItem(item)}
+      <h3>${esc(item.nome)}</h3>
+      <div class="rodape"><span class="preco">${item.preco ? `<i class="tampa" aria-hidden="true"></i>${item.preco}` : 'Grátis'}</span><span class="botoes">${ouvir}${botao}</span></div>
+    </div>`;
+  }).join('');
+  return `<div class="topo">
+      <div><div class="rotulo">Gaste as Tampinhas dos Chefões</div><h2>Bazar das Tampinhas</h2></div>
+      <div class="tampinhas grande"><i class="tampa" aria-hidden="true"></i>${p.tampinhas}</div>
+      <button class="btn fantasma acao" data-acao="irMenu">Voltar</button>
+    </div>
+    <p class="explica">${esc(d.bazar.moeda.descricao)} O mapa mostra quanto cada Chefão deixa cair (mais 1 por bairro); vencer o Rei do Truco dá +${d.bazar.recompensas.vitoriaRun}.</p>
+    <div class="botoes abas">${abas}</div>
+    <p class="rotulo" style="margin:10px 0">${esc(cat.descricao)}</p>
+    <div class="grade">${itens}</div>`;
+}
+
+function telaAdmin() {
+  const a = app.admin;
+  const carregando = '<p class="rotulo">Carregando...</p>';
+  const novos = a.novos?.length ? `<div class="placa novos-convites">
+      <h3>Convites novos</h3>
+      <p>Mande o link para cada pessoa. Cada convite serve para criar 1 conta.</p>
+      <ul class="lista-convites">${a.novos.map((c) => `<li><code>${esc(c)}</code><button class="btn peq acao" data-acao="copiar" data-arg="${esc(linkConvite(c))}">Copiar link</button></li>`).join('')}</ul>
+      <button class="btn amarelo peq acao" data-acao="copiar" data-arg="${esc(a.novos.map(linkConvite).join('\n'))}">Copiar todos os links</button>
+    </div>` : '';
+  const convites = !a.convites ? carregando : !a.convites.length ? '<p class="rotulo">Nenhum convite ainda.</p>' : `<div class="rolagem"><table class="tabela">
+      <thead><tr><th>Código</th><th>Situação</th><th>Observação</th><th></th></tr></thead>
+      <tbody>${a.convites.map((c) => `<tr>
+        <td><code>${esc(c.codigo)}</code></td>
+        <td>${c.usadoPor ? `Usado por <b>${esc(c.usadoPor)}</b>` : '<span class="livre">Livre</span>'}</td>
+        <td>${esc(c.observacao ?? '')}</td>
+        <td class="botoes">${c.usadoPor ? '' : `<button class="btn peq acao" data-acao="copiar" data-arg="${esc(linkConvite(c.codigo))}">Copiar link</button><button class="btn peq fantasma acao" data-acao="apagarConvite" data-arg="${esc(c.codigo)}">Apagar</button>`}</td>
+      </tr>`).join('')}</tbody></table></div>`;
+  const jogadores = !a.jogadores ? carregando : `<div class="rolagem"><table class="tabela tabela-jogadores">
+      <thead><tr><th>Jogador</th><th>Tampinhas</th><th>Réis (run atual)</th><th>Último jogo</th><th></th></tr></thead>
+      <tbody>${a.jogadores.map((j) => `<tr data-jogador="${esc(j.nome)}">
+        <td><b>${esc(j.nome)}</b>${j.admin ? ' <span class="selo-admin">admin</span>' : ''}</td>
+        <td><input class="num-adm" type="number" min="0" step="1" inputmode="numeric" data-campo="tampinhas" value="${j.tampinhas}" aria-label="Tampinhas de ${esc(j.nome)}"></td>
+        <td>${j.reis == null ? '<span class="rotulo">sem run</span>' : `<input class="num-adm" type="number" min="0" step="1" inputmode="numeric" data-campo="reis" value="${j.reis}" aria-label="Réis de ${esc(j.nome)}">`}</td>
+        <td class="rotulo">${j.atualizadoEm ? new Date(j.atualizadoEm).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td>
+        <td><button class="btn amarelo peq acao" data-acao="salvarJogador" data-arg="${esc(j.nome)}">Salvar</button></td>
+      </tr>`).join('')}</tbody></table></div>`;
+  const livres = a.convites?.filter((c) => !c.usadoPor).length ?? 0;
+  return `<div class="topo">
+      <div><div class="rotulo">Só você vê esta tela</div><h2>Painel do admin</h2></div>
+      <button class="btn fantasma acao" data-acao="irMenu">Voltar</button>
+    </div>
+    <div class="painel-admin">
+      <section class="lousa">
+        <h2>Convites</h2>
+        <p class="rotulo">Quem não tem convite não consegue criar conta. Escolha quantos criar (até 100 de uma vez).${a.convites ? ` Livres agora: ${livres}.` : ''}</p>
+        <div class="campo-admin">
+          <label for="adm-qtd">Quantidade</label>
+          <input id="adm-qtd" type="number" min="1" max="100" step="1" value="5" inputmode="numeric">
+          <label for="adm-obs">Observação (opcional)</label>
+          <input id="adm-obs" maxlength="60" placeholder="ex.: turma do trabalho">
+          <button class="btn amarelo acao" data-acao="criarConvites">Criar convites</button>
+        </div>
+        ${novos}
+        ${convites}
+      </section>
+      <section class="lousa">
+        <h2>Jogadores</h2>
+        <p class="rotulo">Mude as Tampinhas (ficam entre as runs) ou os réis da run em andamento e toque em Salvar. Se a pessoa estiver jogando, o valor muda no próximo salvamento dela.</p>
+        ${jogadores}
+      </section>
+    </div>`;
+}
+
+function telaJogo() {
+  const r = app.jogo.run;
+  if (r.fase === 'mapa') return telaMapa();
+  if (r.fase === 'boteco') return telaBoteco();
+  if ((r.fase === 'derrota' || r.fase === 'vitoria') && (app.resumo || !r.mesa)) return telaFim();
+  return telaMesa();
+}
+
+// ---------- mapa ----------
+
+function bairrosHTML(r) {
+  const total = app.dados.regras.bairros;
+  let html = '';
+  for (let b = 1; b <= Math.max(total, r.bairro); b++) html += `<span class="${b < r.bairro ? 'feito' : b === r.bairro ? 'agora' : ''}" title="Bairro ${b}">${b}</span>`;
+  return `<div class="bairros" aria-label="Bairro ${r.bairro} de ${total}">${html}</div>`;
+}
+
+function telaMapa() {
+  const j = app.jogo;
+  const r = j.run;
+  const E = app.dados.regras.economia;
+  const cards = TIPOS_MESA.map((tipo, idx) => {
+    const info = j.infoMesa(r.bairro, idx);
+    const p = info.pessoa;
+    const estado = idx < r.mesaIdx ? 'feita' : idx === r.mesaIdx ? 'agora' : 'futura';
+    const rotulo = { feita: 'Concluída', agora: 'Próxima', futura: 'Depois' }[estado];
+    const atual = estado === 'agora';
+    const extra = info.regras.recompensaExtra ? ` + ${info.regras.recompensaExtra} da manha` : '';
+    const tampas = j.tampinhasDaMesa(r.bairro === app.dados.regras.bairros && !r.infinito, info.chefao, r.bairro);
+    return `<div class="ficha mesa-card ${estado} ${info.chefao ? 'chefe' : ''}">
+      ${infoBtn('pessoa', p.id, p.nome)}
+      <span class="estado">${rotulo} · ${NOME_MESA[tipo]}</span>
+      <div class="pessoa-cab">${avatarHTML(p, true)}<div><h3>${esc(p.nome)}</h3><small>${esc(p.titulo)}</small></div></div>
+      <div><span class="meta">${fmt(info.meta)}</span> <span>pontos de meta</span></div>
+      <p class="manha ${info.chefao ? 'chefe' : ''}"><b>${info.chefao ? 'Regra do Chefão' : 'Manha'}:</b> ${esc(p.regra)}</p>
+      <p>Recompensa: ${E.recompensaMesa[tipo]} réis + 1 por mão que sobrar${extra}</p>
+      ${info.chefao ? `<p class="drop"><i class="tampa" aria-hidden="true"></i>Deixa cair <b>${tampas} Tampinhas</b></p>` : ''}
+      ${atual ? `<div class="botoes" style="margin-top:auto">
+        <button class="btn truco acao" data-acao="sentar">Sentar com ${esc(p.nome)}</button>
+        ${r.promessa ? `<button class="btn acao" data-acao="pularMesa" title="Pular esta Mesa">Pular: ${esc(r.promessa.descricao)}</button>` : ''}
+      </div>` : ''}
+    </div>`;
+  }).join('');
+  return `<div class="topo">
+      <div><div class="rotulo">Bairro ${r.bairro} · seed ${esc(r.seed)}</div><h2>${esc(j.nomeBairro())}</h2></div>
+      ${bairrosHTML(r)}
+      <div class="num" style="color:var(--lampada);font-size:1.4rem">${r.reis} réis</div>
+    </div>
+    <div class="mesas">${cards}</div>
+    ${painelColecaoRun(j, false)}
+    <div class="botoes" style="margin-top:18px"><button class="btn fantasma peq acao" data-acao="modal" data-arg="sair">Sair da run</button></div>`;
+}
+
+function painelColecaoRun(j, loja) {
+  return `<div class="faixa" style="margin-top:18px">
+    ${slotsComparsas(j, loja)}
+    ${slotsConsumiveis(j)}
+  </div>
+  <div class="botoes" style="margin-top:12px">
+    <button class="btn fantasma peq acao" data-acao="modal" data-arg="baralho">Baralho (${j.run.deck.length})</button>
+    <button class="btn fantasma peq acao" data-acao="modal" data-arg="jogadas">Jogadas</button>
+  </div>`;
+}
+
+function slotsComparsas(j, loja = false) {
+  const r = j.run;
+  const html = r.comparsas.map((inst, i) => {
+    const def = app.dados.comparsasPorId[inst.id];
+    const extras = loja ? `<div class="acoes-slot">
+      <button class="btn peq acao" data-acao="mover" data-arg="${inst.uid}:-1" ${i === 0 ? 'disabled' : ''} aria-label="Mover para a esquerda">◀</button>
+      <button class="btn peq acao" data-acao="mover" data-arg="${inst.uid}:1" ${i === r.comparsas.length - 1 ? 'disabled' : ''} aria-label="Mover para a direita">▶</button>
+      <button class="btn peq acao" data-acao="vender" data-arg="${inst.uid}">Vender ${j.precoVenda(inst.uid)}</button></div>` : '';
+    return slotComparsa(def, inst, extras);
+  });
+  for (let i = r.comparsas.length; i < r.slotsComparsa; i++) html.push('<div class="slot vazio">Comparsa</div>');
+  return `<div class="slots" aria-label="Comparsas">${html.join('')}</div>`;
+}
+
+function slotsConsumiveis(j) {
+  const r = j.run;
+  const html = r.consumiveis.map((item, i) => {
+    const def = defConsumivel(app.dados, item);
+    const podeUsar = item.tipo === 'simpatia' || j.podeUsarCausoAgora();
+    return `<div class="slot consumivel ${item.tipo}">
+      ${infoBtn(item.tipo, item.id, def.nome)}
+      <span class="raridade" style="background:${item.tipo === 'causo' ? '#8a5a2b' : '#5c4a8a'}">${item.tipo === 'causo' ? 'Causo' : 'Simpatia'}</span>
+      <b>${esc(def.nome)}</b><span>${esc(def.descricao)}</span>
+      <div class="acoes-slot">
+        <button class="btn peq acao" data-acao="usar" data-arg="${i}" ${podeUsar ? '' : 'disabled'} title="${item.tipo === 'causo' ? 'Selecione as cartas da mão e use antes da 1ª vaza' : ''}">Usar</button>
+        <button class="btn peq fantasma acao" data-acao="descartarConsumivel" data-arg="${i}" style="color:var(--tinta);box-shadow:inset 0 0 0 2px rgba(0,0,0,.2)" aria-label="Descartar">✕</button>
+      </div></div>`;
+  });
+  for (let i = r.consumiveis.length; i < r.slotsConsumivel; i++) html.push('<div class="slot vazio">Causo ou Simpatia</div>');
+  return `<div class="slots cons" aria-label="Consumíveis">${html.join('')}</div>`;
+}
+
+// ---------- mesa ----------
+
+function contaHTML() {
+  const c = app.conta;
+  return `<div class="conta" id="conta" aria-live="polite">
+    <div class="jogada">${esc(c?.jogada ?? 'Fichas × Mult')}</div>
+    <div class="fxm"><div class="caixa f">${c?.fichas != null ? fmt(c.fichas) : '—'}</div><span class="num">×</span><div class="caixa m">${c?.mult != null ? c.mult : '—'}</div></div>
+    <div class="origem">${esc(c?.origem ?? 'Vença vazas para pontuar')}</div>
+    <div class="total">${c?.total != null ? fmt(c.total) : ''}</div>
+  </div>`;
+}
+
+function lousaMesa(j) {
+  const r = j.run;
+  const m = r.mesa;
+  const p = j.pessoa;
+  const perc = Math.min(100, (m.pontos / m.meta) * 100);
+  return `<aside class="lousa" aria-label="Placar">
+    <div class="rotulo">Bairro ${r.bairro} · ${esc(j.nomeBairro())} · ${NOME_MESA[m.tipo]}</div>
+    <div class="pessoa-cab giz">${avatarHTML(p)}<div><h2>${esc(p.nome)}</h2><div class="sub">${esc(p.titulo)}</div></div></div>
+    <div class="regra-chefao ${j.chefao ? '' : 'manha-giz'}">${infoBtn('pessoa', p.id, p.nome)}<b>${j.chefao ? 'Regra do Chefão' : 'Manha'}:</b> ${esc(p.regra)}</div>
+    <div class="linha-giz" style="display:block">
+      <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="rotulo">Pontos / Meta</span><span class="num">${fmt(m.pontos)} / ${fmt(m.meta)}</span></div>
+      <div class="barra" role="progressbar" aria-valuenow="${Math.round(perc)}" aria-valuemin="0" aria-valuemax="100"><i style="width:${perc}%"></i></div>
+    </div>
+    <div class="stats">
+      <div class="linha-giz"><span class="rotulo">Mãos</span><span class="num">${m.maosRestantes}</span></div>
+      <div class="linha-giz"><span class="rotulo">Trocas</span><span class="num">${m.trocasRestantes}</span></div>
+      <div class="linha-giz"><span class="rotulo">Réis</span><span class="num" style="color:var(--lampada)">${r.reis}</span></div>
+    </div>
+    ${contaHTML()}
+    <div class="botoes botoes-lousa" style="margin-top:12px">
+      <button class="btn fantasma peq acao" data-acao="modal" data-arg="baralho">Baralho (${r.deck.length})</button>
+      <button class="btn fantasma peq acao" data-acao="modal" data-arg="jogadas">Jogadas</button>
+    </div>
+  </aside>`;
+}
+
+function viraVisivel(j) {
+  const rd = j.rodada;
+  if (!rd.vira) return false;
+  const ate = j.regrasMesa.viraEscondidaAte;
+  if (ate == null) return true;
+  return (rd.mao?.vazas.length ?? 0) >= ate;
+}
+
+function vazasHTML(rd, ctx, nomeAdv) {
+  const st = rd.mao;
+  const n = rd.numVazas;
+  const slots = [];
+  for (let i = 0; i < n; i++) {
+    const v = st?.vazas[i];
+    if (v) {
+      const res = v.vencedor === 0 ? '<span class="res v">Sua</span>' : v.vencedor === 1 ? '<span class="res p">Dele</span>' : '<span class="res e">Cangou</span>';
+      const pts = rd.vazasPontuadas.find((x) => x.indice === i);
+      slots.push(`<div class="vaza">
+        <div class="par">${cartaHTML(v.cartas[1], { ctx, mini: true, estatica: true })}${cartaHTML(v.cartas[0], { ctx, mini: true, estatica: true })}</div>
+        ${res}${pts ? `<span class="pts">${fmt(pts.total)}</span>` : ''}
+      </div>`);
+    } else if (st && !st.fim && i === st.vazas.length) {
+      const dele = st.mesa.find((x) => x.jogador === 1);
+      const minha = st.mesa.find((x) => x.jogador === 0);
+      const quem = st.pedido ? 'Truco na mesa' : st.vez === 0 ? 'Sua vez' : `Vez de ${nomeAdv}`;
+      slots.push(`<div class="vaza atual">
+        <div class="par">${dele ? cartaHTML(dele.carta, { ctx, mini: true, estatica: true, entra: true }) : '<div class="carta mini verso" style="opacity:.15"></div>'}${minha ? cartaHTML(minha.carta, { ctx, mini: true, estatica: true, entra: true }) : '<div class="carta mini verso" style="opacity:.15"></div>'}</div>
+        <span class="quem-joga">${quem}</span></div>`);
+    } else {
+      slots.push(`<div class="vaza"><span class="quem-joga" style="margin:auto">${i + 1}ª vaza</span></div>`);
+    }
+  }
+  return `<div class="vazas" style="--n:${n}">${slots.join('')}</div>`;
+}
+
+function acoesMesa(j) {
+  const rd = j.rodada;
+  const m = j.run.mesa;
+  const st = rd.mao;
+  const botoes = [];
+  let dica = '';
+  const n = app.sel.length;
+  const benz = j.regra('benzedeira') && m.benzedeiraUsos > 0 && !rd.revelada && rd.fase !== 'fim';
+  const nome = j.pessoa.nome;
+
+  if (rd.fase === 'vira') {
+    dica = 'Vira-Lata: escolha qual vira vale nesta mão.';
+  } else if (rd.fase === 'troca') {
+    dica = rd.onze ? 'Mão de onze: vale 3, sem truco.' : rd.iniciante === 0 ? 'Você abre. Toque numa carta para selecionar e de novo para jogar. Para trocar, selecione 1, 2 ou 3 cartas.' : `${nome} abre esta mão. Se quiser, troque cartas antes.`;
+    if (m.trocasRestantes > 0) botoes.push(`<button class="btn acao" data-acao="trocar" ${n ? '' : 'disabled'}>Trocar ${n || ''} (${m.trocasRestantes})</button>`);
+    if (rd.iniciante === 0) botoes.push(`<button class="btn amarelo acao" data-acao="jogar" ${n === 1 ? '' : 'disabled'}>Jogar carta</button>`);
+    else botoes.push('<button class="btn amarelo acao" data-acao="abrir">Pronto, pode abrir</button>');
+    if (j.podePedirTruco()) botoes.push(`<button class="btn truco acao" data-acao="truco">${NOME_VALOR[proximoValor(rd.mao?.valor ?? valorInicial(j))] ?? NOME_VALOR[3]}</button>`);
+  } else if (rd.fase === 'jogo') {
+    if (st.pedido && st.pedido.por === 1) {
+      const prox = proximoValor(st.pedido.valor, st.valores);
+      dica = `${nome} pediu ${st.pedido.valor}. Aceitar, aumentar ou correr?`;
+      botoes.push(`<button class="btn amarelo acao" data-acao="responder" data-arg="aceitar">Aceitar (${st.pedido.valor})</button>`);
+      if (prox) botoes.push(`<button class="btn truco acao" data-acao="responder" data-arg="aumentar">${NOME_VALOR[prox]}</button>`);
+      botoes.push(`<button class="btn fantasma acao" data-acao="responder" data-arg="correr">Correr</button>`);
+    } else if (st.pedido) {
+      dica = 'Esperando a resposta...';
+    } else if (st.vez === 0) {
+      dica = 'Sua vez. Toque numa carta e de novo para jogar.';
+      botoes.push(`<button class="btn amarelo acao" data-acao="jogar" ${n === 1 ? '' : 'disabled'}>Jogar carta</button>`);
+      if (j.podePedirTruco()) botoes.push(`<button class="btn truco acao" data-acao="truco">${NOME_VALOR[proximoValor(st.valor, st.valores)]}</button>`);
+    } else {
+      dica = `${nome} está pensando...`;
+    }
+  }
+  if (benz) botoes.push('<button class="btn fantasma acao" data-acao="benzer">Benzer (revelar cartas)</button>');
+  return { botoes: botoes.join(''), dica };
+}
+
+function valorInicial(j) {
+  const rd = j.rodada;
+  if (rd.onze) return app.dados.regras.mesa.valorMaoDeOnze;
+  if (j.regrasMesa.valorInicial) return j.regrasMesa.valorInicial;
+  if (j.run.mesa.maoIdx === 0 && j.regra('valorInicialPrimeiraMao')) return j.regra('valorInicialPrimeiraMao').valor;
+  return 1;
+}
+
+function overlayMesa(j) {
+  if (app.animando) return '';
+  const r = j.run;
+  const rd = j.rodada;
+  const pessoa = j.pessoa;
+  if (r.fase === 'recompensa') {
+    const rm = r.resultadoMesa;
+    return `<div class="sobreposto" role="dialog" aria-modal="true" aria-label="Mesa vencida"><div class="lousa resultado">
+      <h2>Mesa vencida!</h2>
+      ${rm.fala ? `<div class="pessoa-cab giz">${avatarHTML(pessoa)}<div class="fala">${esc(rm.fala)}</div></div>` : ''}
+      <div class="grande">${fmt(rm.pontos)}</div><div class="rotulo" style="text-align:center">de ${fmt(rm.meta)} de meta</div>
+      <div class="linha-giz"><span>Recompensa da Mesa</span><span class="num">+${rm.base}</span></div>
+      <div class="linha-giz"><span>Mãos que sobraram</span><span class="num">+${rm.porMao}</span></div>
+      <div class="linha-giz"><span>Juros</span><span class="num">+${rm.juros}</span></div>
+      ${rm.extra ? `<div class="linha-giz"><span>Manha de ${esc(pessoa.nome)}</span><span class="num">+${rm.extra}</span></div>` : ''}
+      <div class="linha-giz"><span>Réis agora</span><span class="num" style="color:var(--lampada)">${r.reis}</span></div>
+      ${rm.tampinhas ? `<div class="drop-grande"><i class="tampa" aria-hidden="true"></i>+${rm.tampinhas} Tampinhas<small>${esc(pessoa.nome)} deixou cair. Gaste no Bazar (menu).</small></div>` : ''}
+      <div class="botoes"><button class="btn amarelo acao" data-acao="irBoteco">Ir ao Boteco</button></div>
+    </div></div>`;
+  }
+  if (r.fase === 'derrota' || r.fase === 'vitoria') {
+    const venceu = r.fase === 'vitoria';
+    const rm = r.resultadoMesa;
+    return `<div class="sobreposto" role="dialog" aria-modal="true"><div class="lousa resultado">
+      <h2>${venceu ? 'Você é o novo Rei do Truco!' : 'Fim da linha, parceiro'}</h2>
+      <p>${venceu ? 'Ninguém em São Paulo segura esse baralho.' : `${esc(pessoa.nome)} venceu. Faltaram ${fmt(r.mesa.meta - r.mesa.pontos)} pontos para a meta.`}</p>
+      ${venceu && rm?.tampinhas ? `<div class="drop-grande"><i class="tampa" aria-hidden="true"></i>+${rm.tampinhas} Tampinhas</div>` : ''}
+      <div class="botoes"><button class="btn amarelo acao" data-acao="verResumo">Ver resumo</button></div>
+    </div></div>`;
+  }
+  if (rd?.fase !== 'fim' || !rd.resultado) return '';
+  const res = rd.resultado;
+  const titulo = res.venceu ? 'A mão é sua!' : res.vencedor === null ? 'Ninguém levou' : `A mão foi de ${pessoa.nome}`;
+  const linhas = [];
+  const fuga = rd.vazasPontuadas.find((v) => v.fuga);
+  if (res.correu === 1) linhas.push(`<p>${esc(pessoa.nome)} correu do truco.${fuga ? ` Sua melhor carta (${esc(fuga.carta.rank)}) pontuou ${fmt(fuga.total)}.` : ''}</p>`);
+  if (res.correu === 0) linhas.push('<p>Você correu.</p>');
+  for (const p of res.passos) {
+    linhas.push(`<div class="linha-giz"><span>${esc(p.origem)}</span><span class="num">${p.tipo === 'x' ? `×${p.valor}` : `+${fmt(p.valor)}`}</span></div>`);
+  }
+  for (const g of rd.ganhos) linhas.push(`<div class="linha-giz"><span>${esc(g.origem)}</span><span class="num" style="color:var(--lampada)">+${g.valor} réis</span></div>`);
+  if (res.penalidade) linhas.push(`<div class="regra-chefao">Blefe pago: seu truco foi aceito e você perdeu. −${res.penalidade} mão extra.</div>`);
+  if (res.comparsaPerdida) linhas.push(`<div class="regra-chefao">A Viúva Negra desativou ${esc(app.dados.comparsasPorId[res.comparsaPerdida].nome)} nesta Mesa.</div>`);
+  if (rd.quebradas.length) linhas.push('<p>Uma Carta de Vidro quebrou e saiu do baralho.</p>');
+  return `<div class="sobreposto" role="dialog" aria-modal="true" aria-label="${esc(titulo)}"><div class="lousa resultado">
+    <h2>${esc(titulo)}</h2>
+    <div class="grande">${res.venceu ? `+${fmt(res.pontos)}` : '0'}</div>
+    ${linhas.join('')}
+    <div class="linha-giz"><span>Pontos na Mesa</span><span class="num">${fmt(r.mesa.pontos)} / ${fmt(r.mesa.meta)}</span></div>
+    <div class="botoes"><button class="btn amarelo acao" data-acao="proximaMao" autofocus>Próxima mão</button></div>
+  </div></div>`;
+}
+
+function telaMesa() {
+  const j = app.jogo;
+  const r = j.run;
+  const m = r.mesa;
+  const rd = j.rodada;
+  const st = rd.mao;
+  const visivel = viraVisivel(j);
+  const ctx = visivel ? j.ctxForca() : null;
+  const pessoa = j.pessoa;
+
+  const advCartas = st ? st.maos[1] : rd.maoAdv;
+  const adv = advCartas.map((c) => (rd.revelada || rd.reveladas?.includes(c.id) ? cartaHTML(c, { ctx, mini: true, estatica: true }) : versoHTML({ mini: true }))).join('');
+
+  let vira;
+  if (rd.fase === 'vira') {
+    vira = rd.viras.map((v, i) => `<div style="display:grid;gap:6px;justify-items:center">${cartaHTML(v, { mini: true, estatica: true })}<button class="btn peq acao" data-acao="escolherVira" data-arg="${i}">Esta</button></div>`).join('');
+  } else {
+    vira = visivel ? cartaHTML(rd.vira, { mini: true, estatica: true, dados: app.dados }) : versoHTML({ mini: true });
+  }
+
+  const minhas = st ? st.maos[0] : m.mao.map((id) => j.carta(id));
+  const mao = minhas.map((c) => cartaHTML(c, { ctx, sel: app.sel.includes(c.id), dados: app.dados })).join('');
+  const { botoes, dica } = acoesMesa(j);
+  const valor = st ? st.valor : valorInicial(j);
+
+  return `<div class="mesa-layout">
+    ${lousaMesa(j)}
+    <div class="mesa-centro">
+      <div class="faixa">${slotsComparsas(j)}${slotsConsumiveis(j)}</div>
+      <section class="toalha" aria-label="Mesa">
+        <div class="adversario">
+          <div class="quem">${avatarHTML(pessoa, true)}<div><span class="rotulo" style="color:var(--papel)">${esc(pessoa.titulo)}</span><h3>${esc(pessoa.nome)}</h3></div></div>
+          ${rd.fala ? `<div class="fala">${esc(rd.fala)}</div>` : ''}
+          <div class="cartas-adv">${adv}</div>
+          <div class="vira-box"><span class="rotulo">Vira</span>${vira}</div>
+        </div>
+        ${vazasHTML(rd, ctx, pessoa.nome)}
+        <div class="valendo"><span class="rotulo" style="color:var(--papel)">Mão ${m.maoIdx + 1}${rd.onze ? ' · mão de onze' : ''} · valendo</span><span class="num">${valor}</span></div>
+      </section>
+      <section class="mao-area" aria-label="Sua mão">
+        ${app.falaJogador ? `<div class="fala jogador">${esc(app.falaJogador)}</div>` : ''}
+        <div class="mao">${mao}</div>
+        <div class="dica">${esc(dica)}</div>
+        <div class="botoes">${botoes}</div>
+      </section>
+    </div>
+  </div>${overlayMesa(j)}`;
+}
+
+// ---------- boteco ----------
+
+function telaBoteco() {
+  const j = app.jogo;
+  const r = j.run;
+  const itens = r.loja.itens.map((it, i) => {
+    let corpo;
+    if (it.tipo === 'comparsa') {
+      const d = app.dados.comparsasPorId[it.id];
+      corpo = `${infoBtn('comparsa', d.id, d.nome)}<span class="raridade r-${d.raridade}">${NOME_RARIDADE[d.raridade]} · Comparsa</span><h3>${esc(d.nome)}</h3><p>${esc(d.descricao)}</p>`;
+    } else if (it.tipo === 'carta') {
+      const c = it.carta;
+      const detalhes = [c.melhoria && ['melhoria', c.melhoria, app.dados.cartas.melhorias[c.melhoria]], c.selo && ['selo', c.selo, app.dados.cartas.selos[c.selo]]].filter(Boolean);
+      corpo = `<span class="raridade" style="background:#2b5a7a">Carta para o baralho</span>
+        <div style="display:flex;gap:12px;align-items:center">${cartaHTML(c, { estatica: true, dados: app.dados })}
+        <div>${detalhes.length ? detalhes.map(([tipo, id, x]) => `<p><b>${esc(x.nome)}</b> ${infoBtn(tipo, id, x.nome).replace('class="info acao"', 'class="info inline acao"')}<br>${esc(x.descricao)}</p>`).join('') : '<p>Carta comum, sem melhorias. Entra no seu baralho.</p>'}</div></div>`;
+    } else {
+      const d = defConsumivel(app.dados, it);
+      corpo = `${infoBtn(it.tipo, d.id, d.nome)}<span class="raridade" style="background:${it.tipo === 'causo' ? '#8a5a2b' : '#5c4a8a'}">${it.tipo === 'causo' ? 'Causo' : 'Simpatia'}</span><h3>${esc(d.nome)}</h3><p>${esc(d.descricao)}</p>`;
+    }
+    return `<div class="ficha" style="${it.vendido ? 'opacity:.4' : ''}">${corpo}
+      <div class="rodape"><span class="preco">${it.preco} réis</span>
+      <button class="btn amarelo peq acao" data-acao="comprar" data-arg="${i}" ${it.vendido || it.preco > r.reis ? 'disabled' : ''}>${it.vendido ? 'Vendido' : 'Comprar'}</button></div></div>`;
+  }).join('');
+  const prox = j.infoMesa(r.mesaIdx + 1 > 2 ? r.bairro + 1 : r.bairro, (r.mesaIdx + 1) % 3);
+  return `<div class="topo">
+      <div><div class="rotulo">Entre uma mesa e outra</div><h2>Boteco Pé-Sujo</h2></div>
+      <div class="num" style="color:var(--lampada);font-size:1.6rem">${r.reis} réis</div>
+      <div class="botoes">
+        <button class="btn acao" data-acao="reroll" ${r.reis < r.loja.rerollCusto ? 'disabled' : ''}>Outras ofertas (${r.loja.rerollCusto})</button>
+        <button class="btn truco acao" data-acao="seguir">Próxima: ${esc(prox.pessoa.nome)}</button>
+      </div>
+    </div>
+    <div class="grade">${itens}</div>
+    ${painelColecaoRun(j, true)}`;
+}
+
+// ---------- fim ----------
+
+function telaFim() {
+  const j = app.jogo;
+  const r = j.run;
+  const s = r.stats;
+  const venceu = r.fase === 'vitoria';
+  const linhas = [
+    ['Bairro alcançado', `${r.bairro} · ${j.nomeBairro()}`],
+    ['Mesas vencidas', s.mesasVencidas],
+    ['Mãos jogadas / vencidas', `${s.maosJogadas} / ${s.maosVencidas}`],
+    ['Trucos pedidos', s.trucosPedidos],
+    ['Adversário correu', s.adversarioCorreu],
+    ['Maior mão', fmt(s.maiorMao)],
+    ['Causos usados', s.causosUsados],
+    ['Tampinhas ganhas', s.tampinhas ?? 0],
+    ['Baralho', app.dados.baralhosPorId[r.baralhoId].nome],
+  ].map(([k, v]) => `<div class="linha-giz"><span>${k}</span><span class="num">${esc(v)}</span></div>`).join('');
+  return `<section class="menu" style="padding-top:2vh">
+    <h1 class="logo">${venceu ? 'REI DO TRUCO' : 'FIM DA RUN'}</h1>
+    <div class="lousa" style="width:min(100%,480px);text-align:left">
+      ${linhas}
+      <div class="linha-giz"><span>Seed</span><span class="num" style="color:var(--lampada);user-select:all">${esc(r.seed)}</span></div>
+    </div>
+    <div class="botoes">
+      ${venceu ? '<button class="btn amarelo acao" data-acao="continuarInfinito">Seguir no modo infinito</button>' : ''}
+      <button class="btn truco acao" data-acao="irSelecao">Nova run</button>
+      <button class="btn fantasma acao" data-acao="abandonar">Menu</button>
+    </div>
+  </section>`;
+}
+
+// ---------- clássico ----------
+
+function telaClassico() {
+  const p = app.partida;
+  const st = p.mao;
+  const ctx = { vira: st.vira };
+  const pessoa = app.dados.personagensPorId[CLASSICO_PESSOA];
+  const adv = st.maos[1].map(() => versoHTML({ mini: true })).join('');
+  const minhas = st.maos[0].map((c) => (p.ferro && !st.fim
+    ? versoHTML({ acao: 'carta', arg: c.id })
+    : cartaHTML(c, { ctx, sel: app.sel.includes(c.id) }))).join('');
+  const rd = { mao: st, numVazas: 3, vazasPontuadas: [] };
+  const botoes = [];
+  let dica = '';
+  let overlay = '';
+  if (p.fase === 'onze') {
+    dica = 'Mão de onze: veja suas cartas. Jogar vale 3; correr dá 1 ponto ao adversário.';
+    botoes.push('<button class="btn amarelo acao" data-acao="decidirOnze" data-arg="jogar">Jogar a mão</button>');
+    botoes.push('<button class="btn fantasma acao" data-acao="decidirOnze" data-arg="correr">Correr</button>');
+  } else if (p.fase === 'jogo') {
+    if (st.pedido && st.pedido.por === 1) {
+      const prox = proximoValor(st.pedido.valor);
+      dica = `${pessoa.nome} pediu ${st.pedido.valor}.`;
+      botoes.push(`<button class="btn amarelo acao" data-acao="responder" data-arg="aceitar">Aceitar (${st.pedido.valor})</button>`);
+      if (prox) botoes.push(`<button class="btn truco acao" data-acao="responder" data-arg="aumentar">${NOME_VALOR[prox]}</button>`);
+      botoes.push('<button class="btn fantasma acao" data-acao="responder" data-arg="correr">Correr</button>');
+    } else if (st.vez === 0 && !st.pedido) {
+      dica = p.ferro ? 'Mão de ferro: todo mundo joga às cegas.' : 'Sua vez. Toque numa carta e de novo para jogar.';
+      botoes.push(`<button class="btn amarelo acao" data-acao="jogar" ${app.sel.length === 1 ? '' : 'disabled'}>Jogar carta</button>`);
+      if (st.trucoPermitido && st.ultimoAumento !== 0 && proximoValor(st.valor)) botoes.push(`<button class="btn truco acao" data-acao="truco">${NOME_VALOR[proximoValor(st.valor)]}</button>`);
+    } else dica = `${pessoa.nome} está pensando...`;
+  } else if (!app.animando) {
+    const res = p.ultimoResultado;
+    const fim = p.fase === 'fim';
+    const titulo = fim ? (p.vencedor === 0 ? 'Partida sua!' : `Partida de ${pessoa.nome}`) : res.vencedor === 0 ? 'A mão é sua' : res.vencedor === null ? 'Ninguém levou' : `A mão foi de ${pessoa.nome}`;
+    overlay = `<div class="sobreposto" role="dialog" aria-modal="true"><div class="lousa resultado">
+      <h2>${esc(titulo)}</h2>
+      ${res.vencedor !== null ? `<div class="grande">+${res.pontos}</div>` : ''}
+      ${res.correu === 1 ? `<p>${esc(pessoa.nome)} correu.</p>` : res.correu === 0 ? '<p>Você correu.</p>' : ''}
+      <div class="linha-giz"><span>Nós</span><span class="num">${p.placar[0]}</span></div>
+      <div class="linha-giz"><span>Eles</span><span class="num">${p.placar[1]}</span></div>
+      <div class="botoes">${fim ? '<button class="btn truco acao" data-acao="classico">Nova partida</button><button class="btn fantasma acao" data-acao="irMenu">Menu</button>' : '<button class="btn amarelo acao" data-acao="proximaMaoClassico">Próxima mão</button>'}</div>
+    </div></div>`;
+  }
+  return `<div class="mesa-layout">
+    <aside class="lousa">
+      <div class="rotulo">Truco clássico · até ${p.pontosVitoria}</div>
+      <h2>Nós ${p.placar[0]} × ${p.placar[1]} Eles</h2>
+      <div class="linha-giz"><span class="rotulo">Mão</span><span class="num">${p.maoNumero}</span></div>
+      <div class="linha-giz"><span class="rotulo">Valendo</span><span class="num" style="color:var(--lampada)">${st.valor}</span></div>
+      <div class="linha-giz"><span class="rotulo">Quem abre</span><span>${p.pe === 0 ? 'Você' : pessoa.nome}</span></div>
+      ${p.ferro ? '<div class="regra-chefao">Mão de ferro: cartas às cegas</div>' : ''}
+      <div class="botoes" style="margin-top:12px"><button class="btn fantasma peq acao" data-acao="irMenu">Sair</button></div>
+    </aside>
+    <div class="mesa-centro">
+      <section class="toalha">
+        <div class="adversario">
+          <div class="quem">${avatarHTML(pessoa, true)}<div><span class="rotulo" style="color:var(--papel)">${esc(pessoa.titulo)}</span><h3>${esc(pessoa.nome)}</h3></div></div>
+          ${app.falaClassico ? `<div class="fala">${esc(app.falaClassico)}</div>` : ''}
+          <div class="cartas-adv">${adv}</div>
+          <div class="vira-box"><span class="rotulo">Vira</span>${cartaHTML(st.vira, { mini: true, estatica: true })}</div>
+        </div>
+        ${vazasHTML(rd, ctx, pessoa.nome)}
+      </section>
+      <section class="mao-area">
+        ${app.falaJogador ? `<div class="fala jogador">${esc(app.falaJogador)}</div>` : ''}
+        <div class="mao">${minhas}</div><div class="dica">${esc(dica)}</div><div class="botoes">${botoes.join('')}</div></section>
+    </div>
+  </div>${overlay}`;
+}
+
+// ---------- explicações ("i") ----------
+
+function nivelTexto(v) {
+  return v < 0.15 ? 'quase nunca' : v < 0.3 ? 'pouco' : v < 0.5 ? 'às vezes' : v < 0.7 ? 'bastante' : 'muito';
+}
+
+function estiloDeJogo(pessoa) {
+  const p = perfilDe(app.dados, pessoa);
+  const corre = p.coragem <= 0.05 ? 'nunca' : p.coragem >= 0.7 ? 'fácil' : p.coragem >= 0.5 ? 'às vezes' : 'só com mão ruim';
+  return `<ul class="lista-estilo">
+    <li><b>Pede truco:</b> ${nivelTexto(p.agressividade)}</li>
+    <li><b>Blefa:</b> ${nivelTexto(p.blefe * 2.5)}</li>
+    <li><b>Corre do truco:</b> ${corre}</li>
+    <li><b>Joga as cartas:</b> ${p.estrategiaCarta === 'forte_primeiro' ? 'abre com a mais forte' : 'guarda as fortes para o fim'}</li>
+  </ul>`;
+}
+
+function blocoDetalhe(rotulo, nome, curta, longa, extra = '') {
+  return {
+    titulo: nome,
+    corpo: `<span class="raridade" style="background:#2b5a7a">${esc(rotulo)}</span>
+      <p class="curta">${esc(curta)}</p>
+      ${longa ? `<h3 class="secao-giz">Como funciona</h3><p>${esc(longa)}</p>` : ''}
+      ${extra}`,
+  };
+}
+
+function detalheConteudo({ tipo, id }) {
+  const d = app.dados;
+  if (tipo === 'comparsa') {
+    const c = d.comparsasPorId[id];
+    return blocoDetalhe(`Comparsa ${NOME_RARIDADE[c.raridade]}`, c.nome, c.descricao, c.detalhe,
+      `<p class="rotulo">Comparsas ficam nos slots e agem sozinhos, da esquerda para a direita. A ordem importa: somar Mult antes de um ×Mult rende mais. Preço: ${c.preco} réis (vende pela metade).</p>`);
+  }
+  if (tipo === 'causo') {
+    const c = d.causosPorId[id];
+    const alvo = c.alvosMin === c.alvosMax ? `${c.alvosMin} carta${c.alvosMin > 1 ? 's' : ''}` : `de ${c.alvosMin} a ${c.alvosMax} cartas`;
+    return blocoDetalhe('Causo', c.nome, c.descricao, c.detalhe,
+      `<h3 class="secao-giz">Como usar</h3><p>Na Mesa, antes de jogar a 1ª carta da mão: selecione ${alvo} na sua mão e toque em Usar. A mudança é permanente no seu baralho. O Causo é gasto.</p>`);
+  }
+  if (tipo === 'simpatia') {
+    const s = d.simpatiasPorId[id];
+    const jog = d.jogadas[s.jogada];
+    const niveis = app.jogo?.run.niveis ?? null;
+    const n = niveis?.[s.jogada] ?? 1;
+    const agora = valoresJogada(d, niveis, s.jogada);
+    const depois = valoresJogada(d, { ...(niveis ?? {}), [s.jogada]: n + 1 }, s.jogada);
+    const txt = s.jogada === 'cangada'
+      ? `+${agora.multProxima} → +${depois.multProxima} Mult na próxima vaza`
+      : `${agora.fichas} × ${agora.mult} → ${depois.fichas} × ${depois.mult}`;
+    return blocoDetalhe('Simpatia', s.nome, s.descricao, `Sobe a Jogada "${jog.nome}" (${jog.descricao.toLowerCase()}) do nível ${n} para o ${n + 1}. Fichas × Mult da Jogada: ${txt}. Pode usar a qualquer momento; o nível vale até o fim da run.`);
+  }
+  if (tipo === 'jogada') {
+    const j = d.jogadas[id];
+    return blocoDetalhe('Jogada', j.nome, j.descricao, `Nível 1: ${j.fichas} Fichas × ${j.mult} Mult. Cada nível: +${j.fichasPorNivel} Fichas e +${j.multPorNivel} Mult.`);
+  }
+  if (tipo === 'melhoria') {
+    const m = d.cartas.melhorias[id];
+    return blocoDetalhe('Melhoria de carta', m.nome, m.descricao, m.detalhe);
+  }
+  if (tipo === 'selo') {
+    const s = d.cartas.selos[id];
+    return blocoDetalhe('Selo de carta', s.nome, s.descricao, s.detalhe);
+  }
+  if (tipo === 'pessoa') {
+    const p = d.personagensPorId[id];
+    const rotulo = p.tipo === 'chefao' ? (p.final ? 'Chefão final' : 'Chefão') : p.tipo === 'bar' ? 'Mesa do Bar' : 'Mesa do Fundo';
+    return {
+      titulo: p.nome,
+      corpo: `<div class="pessoa-cab giz">${avatarHTML(p, true)}<div><span class="raridade ${p.tipo === 'chefao' ? 'r-rara' : 'r-comum'}">${rotulo}</span><div class="sub">${esc(p.titulo)}</div></div></div>
+        <p class="curta">${esc(p.bio)}</p>
+        <h3 class="secao-giz">${p.tipo === 'chefao' ? 'Regra do Chefão' : 'Manha da Mesa'}: ${esc(p.regra)}</h3>
+        <p>${esc(p.detalhe)}</p>
+        <h3 class="secao-giz">Estilo de jogo</h3>${estiloDeJogo(p)}
+        ${p.drop ? `<p class="drop"><i class="tampa" aria-hidden="true"></i>Deixa cair ${p.drop} Tampinhas, mais 1 por bairro.</p>` : ''}`,
+    };
+  }
+  return { titulo: 'Detalhe', corpo: '' };
+}
+
+// ---------- modais ----------
+
+function modalHTML() {
+  if (!app.modal) return '';
+  let titulo = '';
+  let corpo = '';
+  let larga = false;
+  if (app.modal === 'detalhe' && app.detalhe) {
+    ({ titulo, corpo } = detalheConteudo(app.detalhe));
+  } else if (app.modal === 'baralho' && app.jogo) {
+    titulo = `Seu baralho (${app.jogo.run.deck.length})`;
+    larga = true;
+    corpo = SUITS.map((s) => {
+      const cartas = app.jogo.run.deck.filter((c) => c.suit === s).sort((a, b) => RANKS.indexOf(a.rank) - RANKS.indexOf(b.rank));
+      return `<div><div class="rotulo">${SUIT_NOME[s]} (${cartas.length})</div><div class="baralho-lista">${cartas.map((c) => cartaHTML(c, { mini: true, estatica: true, dados: app.dados })).join('')}</div></div>`;
+    }).join('');
+  } else if (app.modal === 'jogadas') {
+    titulo = 'Jogadas';
+    larga = true;
+    corpo = `<p class="rotulo">Cada vaza vencida é uma Jogada. A pontuação é Fichas × Mult; Simpatias sobem o nível.</p>${tabelaJogadas(app.jogo?.run.niveis ?? null)}`;
+  } else if (app.modal === 'sair') {
+    titulo = 'Sair da run?';
+    corpo = '<p>A run atual será apagada.</p><div class="botoes"><button class="btn truco acao" data-acao="abandonar">Sair e apagar</button><button class="btn fantasma acao" data-acao="fecharModal">Continuar jogando</button></div>';
+  } else if (app.modal === 'som' && app.perfil) {
+    titulo = 'Som';
+    const o = app.perfil.opcoes;
+    const faixa = (chave, nome) => `<label class="faixa-som"><span>${nome}</span><input type="range" min="0" max="1" step="0.05" value="${o[chave]}" data-opcao="${chave}" aria-label="${nome}"></label>`;
+    corpo = `${faixa('musica', 'Música (baião)')}${faixa('ambiente', 'Ambiente do bar')}${faixa('efeitos', 'Efeitos')}${faixa('vozes', 'Vozes')}
+      <label class="faixa-som"><span>Tudo mudo</span><input type="checkbox" ${o.mudo ? 'checked' : ''} data-opcao="mudo"></label>
+      <p class="rotulo">${audio.temVoz() ? 'As vozes usam a fala do seu navegador; o sotaque depende das vozes instaladas no aparelho.' : 'Este navegador não tem voz sintetizada: as falas aparecem só em balões.'}</p>`;
+  } else if (app.modal === 'ajuda') {
+    titulo = 'Como jogar';
+    larga = true;
+    corpo = `
+      <p><b>Truco Paulista.</b> Baralho de 40 cartas (sem 8, 9, 10). Força: 4 &lt; 5 &lt; 6 &lt; 7 &lt; Q &lt; J &lt; K &lt; A &lt; 2 &lt; 3. A carta seguinte à <b>vira</b> é a <b>manilha</b>, que vence tudo: Pica-fumo (♦) &lt; Espadilha (♠) &lt; Copas (♥) &lt; Zap (♣).</p>
+      <p><b>Mão:</b> melhor de 3 vazas. Empate (cangou) na 1ª: decide a 2ª. Ganhou a 1ª e cangou a 2ª: leva quem ganhou a 1ª.</p>
+      <p><b>Truco:</b> a mão vale 1 e o truco sobe para 3, 6, 9 e 12. Quem recebe pode aceitar, correr ou aumentar.</p>
+      <p><b>Na run:</b> você enfrenta 3 pessoas por bairro, em 8 bairros. Cada uma tem uma meta de pontos, um número de mãos e uma <b>manha</b>: uma regra só daquela Mesa. Você recebe 3 cartas e, antes da 1ª vaza, pode trocar 1, 2 ou as 3 (cada troca gasta 1 das trocas da Mesa). Se perde a mão, não leva nada; se o seu truco foi aceito e você perdeu, perde uma mão extra. Se o adversário corre do seu truco, sua melhor carta pontua como uma vaza vencida.</p>
+      <p>A última mão de cada Mesa é a <b>mão de onze</b>: vale 3, sem truco.</p>
+      <h3 class="secao-giz">Glossário</h3>
+      <dl class="glossario">
+        <dt>Fichas × Mult</dt><dd>A conta de cada vaza vencida. Fichas vêm da carta (Ás = 10, 3 = 15, manilha = 20, Zap = 30) e da Jogada; Mult vem da Jogada e dos bônus. Depois a mão é multiplicada pelo valor do truco.</dd>
+        <dt>Jogada</dt><dd>O jeito que você venceu a vaza: Vaza Simples, Matar Seco, Manilhada, Zapada... Cada uma tem Fichas e Mult próprios. Veja em "Jogadas".</dd>
+        <dt>Manha</dt><dd>A regra de cada pessoa da Mesa (Seu Joaquim dá réis por vaza, Rita Navalha tira uma troca...). Chefões têm regras mais duras.</dd>
+        <dt>Réis</dt><dd>Dinheiro da run. Ganha vencendo Mesas; gasta no Boteco. Cada 5 réis guardados rendem 1 de juros (até 5). Some quando a run acaba.</dd>
+        <dt>Tampinhas</dt><dd>Moeda que fica com você para sempre. Só Chefões deixam cair, cada um um valor. Gaste no Bazar das Tampinhas em visual de cartas, toalhas e falas.</dd>
+        <dt>Comparsa</dt><dd>Ajudante permanente da run. Fica num slot e dá bônus sozinho. A ordem dos slots importa.</dd>
+        <dt>Causo</dt><dd>Item de uso único que muda cartas do seu baralho para sempre (naipe, melhoria, cópia...). Use antes da 1ª vaza.</dd>
+        <dt>Simpatia</dt><dd>Item de uso único que sobe o nível de uma Jogada até o fim da run.</dd>
+        <dt>Promessa</dt><dd>Prêmio por pular uma Mesa que não é de Chefão.</dd>
+      </dl>
+      <p>Toque no <span class="info-exemplo">i</span> de qualquer Comparsa, Causo, Simpatia ou pessoa para ver a explicação completa com exemplo.</p>
+      <h3 class="secao-giz">Conta e progresso</h3>
+      <p>${app.usuario?.conta?.tipo === 'claude' ? 'Você está jogando com a sua conta do Claude: o progresso fica salvo nela.' : app.usuario?.conta?.tipo === 'servidor' ? 'Você entrou com nome e senha: o progresso fica salvo no servidor.' : 'Sem conta, o progresso fica salvo só neste navegador.'} A run é salva a cada jogada; se fechar o jogo, use "Continuar run".</p>`;
+  }
+  return `<div class="sobreposto" role="dialog" aria-modal="true" aria-label="${esc(titulo)}" data-fundo-modal>
+    <div class="lousa ${larga ? 'larga' : ''}">
+      <div class="topo" style="margin:0"><h2>${esc(titulo)}</h2><button class="btn fantasma peq acao" data-acao="fecharModal">Fechar</button></div>
+      ${corpo}
+    </div></div>`;
+}
+
+// ---------- início ----------
+
+async function carregarDados() {
+  const raw = {};
+  await Promise.all(ARQUIVOS_DADOS.map(async (nome) => {
+    const resp = await fetch(`data/${nome}.json`);
+    if (!resp.ok) throw new Error(`Falha ao carregar data/${nome}.json`);
+    raw[nome] = await resp.json();
+  }));
+  return montarDados(raw);
+}
+
+render();
+Promise.all([carregarDados(), detectarConta()])
+  .then(async ([dados, det]) => {
+    app.dados = dados;
+    app.usuario = det;
+    let escolheuConvidado = false;
+    try { escolheuConvidado = localStorage.getItem('trucatro.convidado') === '1'; } catch { /* ignora */ }
+    if (app.convite) app.loginModo = 'criar';
+    if (det.conta.tipo === 'local' && det.backend && (det.backend.exigeConta || !escolheuConvidado)) {
+      if (det.temAdmin === false) app.loginModo = 'criar';
+      app.tela = 'login';
+      render();
+      document.getElementById('login-nome')?.focus();
+    } else {
+      await abrirConta(det.conta);
+    }
+  })
+  .catch((e) => {
+    console.error(e);
+    raiz.innerHTML = `<p class="toast" style="position:static;transform:none">${esc(e.message)}</p>`;
+  });

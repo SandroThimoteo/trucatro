@@ -1,0 +1,10 @@
+[
+  { "id": "vaza_simples", "nome": "Vaza Simples", "tipo": "vaza", "descricao": "Vencer a vaza com carta comum", "fichas": 5, "mult": 1, "fichasPorNivel": 5, "multPorNivel": 1 },
+  { "id": "matar_seco", "nome": "Matar Seco", "tipo": "vaza", "descricao": "Vencer com a carta mais fraca da mão que ainda vence (com outra opção mais forte guardada)", "fichas": 10, "mult": 2, "fichasPorNivel": 10, "multPorNivel": 1 },
+  { "id": "manilhada", "nome": "Manilhada", "tipo": "vaza", "descricao": "Vencer a vaza com manilha", "fichas": 20, "mult": 3, "fichasPorNivel": 15, "multPorNivel": 1 },
+  { "id": "zapada", "nome": "Zapada", "tipo": "vaza", "descricao": "Vencer a vaza com o Zap", "fichas": 40, "mult": 4, "fichasPorNivel": 20, "multPorNivel": 2 },
+  { "id": "cangada", "nome": "Cangada", "tipo": "vaza", "descricao": "Empatar a vaza: não pontua, mas dá +Mult na próxima vaza vencida", "fichas": 0, "mult": 1, "multProxima": 2, "fichasPorNivel": 0, "multPorNivel": 0, "multProximaPorNivel": 1 },
+  { "id": "queda_limpa", "nome": "Queda Limpa", "tipo": "mao", "descricao": "Vencer todas as vazas da mão", "fichas": 30, "mult": 4, "fichasPorNivel": 15, "multPorNivel": 1 },
+  { "id": "virada", "nome": "Virada", "tipo": "mao", "descricao": "Perder a 1ª vaza e vencer a 2ª e a 3ª", "fichas": 50, "mult": 5, "fichasPorNivel": 20, "multPorNivel": 1 },
+  { "id": "mao_de_onze", "nome": "Mão de Onze", "tipo": "mao", "descricao": "Vencer a última mão da Mesa (mão de onze)", "fichas": 60, "mult": 6, "fichasPorNivel": 25, "multPorNivel": 1 }
+]
