@@ -790,24 +790,77 @@ body:has(.palco) .faixa .slot { position: relative; z-index: 27; }
 .vaza:has(.res.v) .par .carta:last-child { box-shadow: 0 0 0 2px var(--ok), 0 0 16px var(--ok); }
 .vaza:has(.res.v) .pts { animation: carimbo-total 0.4s ease-out; }
 
-/* ---------- Bazar: brilho da carta (aura) ---------- */
-.efeito-holo .palco-carta .carta, .efeito-holo .mao .carta.sel {
-  background-image: linear-gradient(125deg, rgba(255, 0, 128, 0.25), rgba(0, 200, 255, 0.25), rgba(140, 255, 0, 0.25), rgba(255, 200, 0, 0.25), rgba(255, 0, 128, 0.25)), var(--carta-fundo, linear-gradient(160deg, var(--papel), var(--papel-2)));
-  background-size: 300% 300%, auto; animation: holo 3s linear infinite;
+/* ---------- Bazar: brilho da carta (aura) ----------
+   Cada brilho tem 3 partes: --aura (contorno luminoso da carta), uma camada animada atrás da
+   carta (::before da .palco-carta) e, no holográfico, um reflexo por cima (::after da carta).
+   Vale no palco, na carta selecionada da mão e na prévia do Bazar. */
+.palco-carta { isolation: isolate; }
+.efeito-preview { position: relative; overflow: visible; min-height: 150px; }
+.efeito-preview .palco-carta { animation: none; filter: none; }
+.efeito-preview .carta { --carta-w: 70px; }
+.efeito-preview .palco-carta .carta { box-shadow: var(--aura, 0 0 0 3px var(--lampada), 0 8px 16px rgba(0, 0, 0, 0.5)); }
+.palco-carta .carta { box-shadow: var(--aura, 0 0 0 4px var(--lampada), 0 0 60px rgba(242, 193, 78, 0.55), 0 20px 40px rgba(0, 0, 0, 0.6)); }
+.mao .carta.sel { box-shadow: var(--aura-mao, 0 0 0 3px var(--fichas), 0 14px 22px var(--sombra)); }
+
+[class*="efeito-"]:not(.efeito-nenhum) .palco-carta::before {
+  content: ''; position: absolute; z-index: -1; inset: -26px; border-radius: 26px; pointer-events: none;
 }
-@keyframes holo { to { background-position: 300% 300%, 0 0; } }
-.efeito-fogo .palco-carta::before, .efeito-gelo .palco-carta::before, .efeito-neon .palco-carta::before, .efeito-estrelas .palco-carta::before, .efeito-ouro .palco-carta::before {
-  content: ''; position: absolute; inset: -18px; z-index: -1; border-radius: 22px; pointer-events: none;
+
+/* Holográfica: arco-íris correndo por cima da carta */
+.efeito-holo { --aura: 0 0 0 3px #fff, 0 0 18px 4px rgba(120, 220, 255, 0.8), 0 0 40px 10px rgba(255, 90, 200, 0.45); --aura-mao: var(--aura); }
+.efeito-holo :is(.palco-carta, .mao) .carta::after {
+  content: ''; position: absolute; inset: 0; z-index: 2; border-radius: inherit; pointer-events: none; mix-blend-mode: color-dodge; opacity: 0.75;
+  background: linear-gradient(115deg, #ff3c8e, #ffd23c, #3cff9a, #3cc8ff, #b23cff, #ff3c8e) 0 0 / 300% 300%;
+  animation: holo 2.4s linear infinite;
 }
-.efeito-fogo .palco-carta::before { background: radial-gradient(ellipse at 50% 100%, #ffde59, #ff6a1f 40%, transparent 70%); filter: blur(10px); animation: chama 0.5s ease-in-out infinite alternate; }
-@keyframes chama { from { transform: scaleY(1) translateY(0); opacity: 0.8; } to { transform: scaleY(1.15) translateY(-8px); opacity: 1; } }
-.efeito-gelo .palco-carta::before { background: conic-gradient(from 0deg, #bdf3ff, #3fa9ff, #e6f6ff, #7ad7ff, #bdf3ff); filter: blur(12px); animation: sol-gira 4s linear infinite; }
-.efeito-neon .palco-carta::before { box-shadow: 0 0 0 4px #ff4fa3, 0 0 30px #ff4fa3, 0 0 60px #b06bff; animation: neon 1.2s steps(2) infinite; }
-@keyframes neon { 50% { box-shadow: 0 0 0 4px #39ff8a, 0 0 30px #39ff8a, 0 0 60px #3fa9ff; } }
-.efeito-estrelas .palco-carta::before { inset: -40px; background: radial-gradient(circle, #fff 0 1.5px, transparent 2px) 0 0 / 22px 22px, radial-gradient(circle, #f2c14e 0 1px, transparent 1.5px) 11px 11px / 22px 22px; mask-image: radial-gradient(circle, #000 30%, transparent 70%); -webkit-mask-image: radial-gradient(circle, #000 30%, transparent 70%); animation: sol-gira 20s linear infinite; }
-.efeito-ouro .palco-carta::before { background: conic-gradient(#f7e2a1, #d9a536, #fff6d5, #b8862b, #f7e2a1); filter: blur(6px); animation: sol-gira 3s linear infinite; }
-.efeito-preview { position: relative; display: grid; place-items: center; }
-.efeito-preview .carta { --carta-w: 64px; }
+.efeito-holo .mao .carta:not(.sel)::after { opacity: 0.25; }
+@keyframes holo { to { background-position: 300% 300%; } }
+.efeito-holo .palco-carta::before { background: conic-gradient(#ff3c8e, #ffd23c, #3cff9a, #3cc8ff, #b23cff, #ff3c8e); filter: blur(16px); opacity: 0.8; animation: sol-gira 3s linear infinite; }
+
+/* Pegando fogo: chamas subindo atrás da carta */
+.efeito-fogo { --aura: 0 0 0 3px #ffde59, 0 0 22px 6px #ff6a1f, 0 -10px 40px 12px rgba(255, 120, 30, 0.7); --aura-mao: var(--aura); }
+.efeito-fogo .palco-carta::before {
+  inset: -30px -20px -10px; border-radius: 50% 50% 30% 30%;
+  background: radial-gradient(ellipse at 50% 100%, #fff3b0 0, #ffde59 18%, #ff6a1f 45%, rgba(179, 38, 30, 0.7) 65%, transparent 75%);
+  filter: blur(8px); animation: chama 0.35s ease-in-out infinite alternate;
+}
+@keyframes chama { from { transform: scale(1, 1) translateY(0); opacity: 0.85; } to { transform: scale(1.06, 1.18) translateY(-12px); opacity: 1; } }
+
+/* Cerveja trincando: gelo azul e cristais girando */
+.efeito-gelo { --aura: 0 0 0 3px #e6f6ff, 0 0 20px 6px #7ad7ff, 0 0 46px 14px rgba(63, 169, 255, 0.55); --aura-mao: var(--aura); }
+.efeito-gelo .palco-carta::before {
+  background: repeating-conic-gradient(from 0deg, rgba(230, 246, 255, 0.95) 0 4deg, transparent 4deg 30deg), radial-gradient(circle, rgba(122, 215, 255, 0.9), transparent 70%);
+  filter: blur(2px); border-radius: 50%; inset: -40px; animation: sol-gira 6s linear infinite;
+}
+
+/* Neon de boate: contorno que troca de cor */
+.efeito-neon { --aura: 0 0 0 4px #ff4fa3, 0 0 24px 6px #ff4fa3, 0 0 60px 16px #b06bff; --aura-mao: var(--aura); }
+.efeito-neon :is(.palco-carta, .mao) .carta.sel, .efeito-neon .palco-carta .carta { animation: neon 0.9s steps(1) infinite; }
+@keyframes neon { 50% { box-shadow: 0 0 0 4px #39ff8a, 0 0 24px 6px #39ff8a, 0 0 60px 16px #3fa9ff; } }
+.efeito-neon .palco-carta::before { border: 3px solid #ff4fa3; box-shadow: 0 0 20px #ff4fa3, inset 0 0 20px #ff4fa3; animation: neon-borda 0.9s steps(1) infinite; }
+@keyframes neon-borda { 50% { border-color: #39ff8a; box-shadow: 0 0 20px #39ff8a, inset 0 0 20px #39ff8a; } }
+
+/* Céu estrelado: estrelas piscando em volta */
+.efeito-estrelas { --aura: 0 0 0 3px #fff6d5, 0 0 24px 6px rgba(176, 107, 255, 0.8), 0 0 50px 14px rgba(27, 18, 70, 0.9); --aura-mao: var(--aura); }
+.efeito-estrelas .palco-carta::before {
+  inset: -46px; border-radius: 50%;
+  background:
+    radial-gradient(circle, #fff 0 2px, transparent 2.5px) 0 0 / 26px 26px,
+    radial-gradient(circle, #f2c14e 0 1.5px, transparent 2px) 13px 13px / 26px 26px,
+    radial-gradient(circle, #2a1a5e, #0c0818 70%, transparent 72%);
+  animation: sol-gira 14s linear infinite, pisca-estrela 1.2s ease-in-out infinite alternate;
+}
+@keyframes pisca-estrela { from { opacity: 0.7; } to { opacity: 1; } }
+
+/* Coroa de ouro: anel dourado girando e raios */
+.efeito-ouro { --aura: 0 0 0 4px #ffd34d, 0 0 0 7px #b8862b, 0 0 34px 10px rgba(255, 200, 60, 0.85); --aura-mao: var(--aura); }
+.efeito-ouro .palco-carta::before {
+  inset: -38px; border-radius: 50%;
+  background: repeating-conic-gradient(#ffd34d 0 8deg, #b8862b 8deg 14deg, transparent 14deg 30deg);
+  mask-image: radial-gradient(circle, transparent 38%, #000 40%, #000 62%, transparent 72%);
+  -webkit-mask-image: radial-gradient(circle, transparent 38%, #000 40%, #000 62%, transparent 72%);
+  animation: sol-gira 4s linear infinite;
+}
 .raio-branco { --raio-cor: #cfe8ff; --raio-cor2: #ffffff; }
 .raio-rosa { --raio-cor: #ff5fb8; --raio-cor2: #ffe3f3; }
 .raio-dourado { --raio-cor: #ffb800; --raio-cor2: #fff3b0; }
