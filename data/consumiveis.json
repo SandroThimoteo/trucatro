@@ -14,11 +14,11 @@
       "efeito": { "tipo": "destruir" } },
     { "id": "causo_promessa", "nome": "Causo da Promessa", "preco": 3, "alvosMin": 1, "alvosMax": 1,
       "descricao": "+10 Fichas permanentes em 1 carta",
-      "detalhe": "A carta escolhida ganha +10 Fichas para sempre. O bônus aparece no canto da carta e soma toda vez que ela vencer uma vaza.",
+      "detalhe": "A carta escolhida ganha +10 Fichas para sempre. O bônus aparece no canto da carta e soma toda vez que ela vencer uma rodada.",
       "efeito": { "tipo": "bonusFichas", "valor": 10 } },
     { "id": "causo_ourives", "nome": "Causo do Ourives", "preco": 4, "alvosMin": 1, "alvosMax": 1,
       "descricao": "Transforma 1 carta em Carta de Ouro",
-      "detalhe": "A carta vira Carta de Ouro: toda vez que vencer uma vaza, você ganha 3 réis.",
+      "detalhe": "A carta vira Carta de Ouro: toda vez que vencer uma rodada, você ganha 3 réis.",
       "efeito": { "tipo": "melhoria", "melhoria": "ouro" } },
     { "id": "causo_vidraceiro", "nome": "Causo do Vidraceiro", "preco": 4, "alvosMin": 1, "alvosMax": 1,
       "descricao": "Transforma 1 carta em Carta de Vidro",
@@ -30,7 +30,7 @@
       "efeito": { "tipo": "selo", "selo": "vermelho" } }
   ],
   "simpatias": [
-    { "id": "simpatia_santo_antonio", "nome": "Simpatia de Santo Antônio", "preco": 3, "jogada": "vaza_simples", "descricao": "Sobe 1 nível de Vaza Simples" },
+    { "id": "simpatia_santo_antonio", "nome": "Simpatia de Santo Antônio", "preco": 3, "jogada": "vaza_simples", "descricao": "Sobe 1 nível de Rodada Simples" },
     { "id": "simpatia_cosme_damiao", "nome": "Simpatia de Cosme e Damião", "preco": 3, "jogada": "matar_seco", "descricao": "Sobe 1 nível de Matar Seco" },
     { "id": "simpatia_sao_jorge", "nome": "Simpatia de São Jorge", "preco": 3, "jogada": "manilhada", "descricao": "Sobe 1 nível de Manilhada" },
     { "id": "simpatia_arruda", "nome": "Simpatia da Arruda", "preco": 3, "jogada": "zapada", "descricao": "Sobe 1 nível de Zapada" },

@@ -154,6 +154,9 @@ function contaDoBackend(backend, token, eu) {
 }
 
 async function lerConfigOnline() {
+  // Jogando em localhost (node server.js) não mexe no banco de verdade, a não ser com ?online=1
+  const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+  if (local && new URLSearchParams(location.search).get('online') !== '1') return null;
   try {
     const r = await fetch('data/online.json', { cache: 'no-store' });
     if (!r.ok) return null;

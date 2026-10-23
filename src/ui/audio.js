@@ -149,6 +149,18 @@ const EFEITOS = {
   },
   vitoria() { [523, 659, 784, 1047].forEach((f, i) => dedilhar(f, ctx.currentTime + i * 0.11, 0.6, 0.28, barramentos.efeitos)); },
   derrota() { [392, 349, 311, 262].forEach((f, i) => dedilhar(f, ctx.currentTime + i * 0.16, 0.7, 0.22, barramentos.efeitos)); },
+  // Raio do Comparsa acertando a carta: estalo elétrico + zumbido que sobe
+  raio(passo = 0) {
+    const t = ctx.currentTime;
+    for (let i = 0; i < 3; i++) chiado({ t: t + i * 0.025, dur: 0.04, freq: 3500 + Math.random() * 3000, q: 0.8, pico: 0.35 });
+    tom({ freq: 180 * 2 ** (Math.min(passo, 12) / 12), tipo: 'sawtooth', t, dur: 0.22, pico: 0.12, deslize: 900, filtro: 3000 });
+  },
+  palco() { tom({ freq: 330, tipo: 'triangle', dur: 0.25, pico: 0.15, deslize: 660 }); },
+  total() {
+    const t = ctx.currentTime;
+    tom({ freq: 784, tipo: 'square', t, dur: 0.12, pico: 0.08, filtro: 3000 });
+    tom({ freq: 1175, tipo: 'square', t: t + 0.08, dur: 0.3, pico: 0.08, filtro: 3000 });
+  },
   copo() { tom({ freq: 2400 + Math.random() * 1600, dur: 0.5, pico: 0.12, destino: barramentos.ambiente }); },
 };
 
@@ -184,16 +196,27 @@ function ligarAmbiente() {
   agendar();
 }
 
-// ---------- música: baião em loop ----------
+// ---------- música: ritmos em loop (estilo escolhido no Bazar) ----------
 
-const BPM = 96;
-const SEMI = 60 / BPM / 4; // semicolcheia
-// I - bVII - IV - I em Sol mixolídio
-const ACORDES = [
-  [196, 247, 294], [175, 220, 262], [131, 165, 196], [196, 247, 294],
-];
-const ESCALA = [392, 440, 494, 523, 587, 659, 698, 784];
-const MELODIA = [0, -1, 2, -1, 4, 3, 2, -1, 1, -1, 3, -1, 5, 4, 3, -1, 2, -1, 0, -1, 3, 2, 1, -1, 4, -1, 2, 1, 0, -1, -1, -1];
+// Acordes como frequências; melodia em graus da escala (-1 = pausa), uma nota a cada colcheia.
+const SOL_MIXO = { acordes: [[196, 247, 294], [175, 220, 262], [131, 165, 196], [196, 247, 294]], escala: [392, 440, 494, 523, 587, 659, 698, 784] };
+const DO_MAIOR = { acordes: [[131, 165, 196], [175, 220, 262], [196, 247, 294], [131, 165, 196]], escala: [523, 587, 659, 698, 784, 880, 988, 1047] };
+const RE_MAIOR = { acordes: [[147, 185, 220], [220, 277, 330], [196, 247, 294], [147, 185, 220]], escala: [294, 330, 370, 392, 440, 494, 554, 587] };
+const LA_MENOR = { acordes: [[220, 262, 330], [175, 220, 262], [196, 247, 294], [165, 208, 247]], escala: [440, 494, 523, 587, 659, 698, 784, 880] };
+
+const ESTILOS = {
+  baiao: { bpm: 96, ...SOL_MIXO, zabumba: [0, 6, 8, 14], aguda: [6, 14], caixa: [2, 6, 10, 14], chimbal: 'triangulo', acorde: [4, 12],
+    melodia: [0, -1, 2, -1, 4, 3, 2, -1, 1, -1, 3, -1, 5, 4, 3, -1, 2, -1, 0, -1, 3, 2, 1, -1, 4, -1, 2, 1, 0, -1, -1, -1] },
+  forro: { bpm: 124, ...DO_MAIOR, zabumba: [0, 3, 8, 11], aguda: [3, 11], caixa: [4, 12], chimbal: 'triangulo', acorde: [2, 6, 10, 14],
+    melodia: [4, 3, 2, 3, 4, -1, 4, -1, 5, 4, 3, 4, 5, -1, 5, -1, 6, 5, 4, 3, 2, -1, 3, -1, 4, 3, 2, 1, 0, -1, -1, -1] },
+  xote: { bpm: 78, ...DO_MAIOR, zabumba: [0, 10], aguda: [], caixa: [4, 12], chimbal: 'colcheia', acorde: [6, 14],
+    melodia: [2, -1, 3, -1, 4, -1, -1, -1, 4, -1, 3, -1, 2, -1, -1, -1, 1, -1, 2, -1, 3, -1, -1, -1, 2, -1, 1, -1, 0, -1, -1, -1] },
+  samba: { bpm: 100, ...LA_MENOR, zabumba: [4, 12], aguda: [], caixa: [0, 3, 6, 8, 10, 13], chimbal: 'pandeiro', acorde: [2, 5, 9, 12],
+    melodia: [4, -1, 4, 3, 2, -1, 0, -1, 2, 3, 4, -1, 5, -1, 4, -1, 3, -1, 3, 2, 1, -1, 2, -1, 0, -1, 1, 2, 0, -1, -1, -1] },
+  viola: { bpm: 72, ...RE_MAIOR, zabumba: [0], aguda: [], caixa: [], chimbal: null, acorde: [], arpejo: true,
+    melodia: [2, -1, 4, -1, 2, -1, 0, -1, 1, -1, 3, -1, 1, -1, -1, -1, 2, -1, 4, -1, 5, -1, 4, -1, 2, -1, 1, -1, 0, -1, -1, -1] },
+};
+let estilo = ESTILOS.baiao;
 
 function ligarMusica() {
   if (musicaTimer || !ctx) return;
@@ -203,29 +226,35 @@ function ligarMusica() {
     while (proximo < ctx.currentTime + 0.25) {
       tocarPasso(passo, proximo);
       passo = (passo + 1) % 64;
-      proximo += SEMI;
+      proximo += 60 / estilo.bpm / 4; // semicolcheia
     }
   };
   musicaTimer = setInterval(agendar, 60);
 }
 
 function tocarPasso(passo, t) {
-  const compasso = Math.floor(passo / 16) % ACORDES.length;
+  const e = estilo;
+  const compasso = Math.floor(passo / 16) % e.acordes.length;
   const p = passo % 16;
-  const acorde = ACORDES[compasso];
+  const acorde = e.acordes[compasso];
   const destino = barramentos.musica;
-  // zabumba: tum (1), tum (2e), bacalhau leve no contratempo
-  if (p === 0 || p === 6 || p === 8 || p === 14) tom({ freq: p === 6 || p === 14 ? 70 : 60, tipo: 'sine', t, dur: 0.22, pico: 0.9, deslize: 38, destino });
-  if (p % 4 === 2) chiado({ t, dur: 0.05, freq: 1400, pico: 0.25, destino });
-  // triângulo: todas as semicolcheias, abre no contratempo
-  chiado({ t, dur: p % 2 ? 0.09 : 0.03, freq: 7500, q: 4, pico: p % 4 === 2 ? 0.2 : 0.08, destino });
+  // zabumba / surdo
+  if (e.zabumba.includes(p)) tom({ freq: e.aguda.includes(p) ? 72 : 58, tipo: 'sine', t, dur: 0.24, pico: 0.9, deslize: 38, destino });
+  // caixa / bacalhau / tamborim
+  if (e.caixa.includes(p)) chiado({ t, dur: 0.05, freq: e.chimbal === 'pandeiro' ? 2600 : 1400, pico: 0.25, destino });
+  // triângulo (semicolcheias), pandeiro (semicolcheias leves) ou colcheias
+  if (e.chimbal === 'triangulo') chiado({ t, dur: p % 2 ? 0.09 : 0.03, freq: 7500, q: 4, pico: p % 4 === 2 ? 0.2 : 0.08, destino });
+  else if (e.chimbal === 'pandeiro') chiado({ t, dur: 0.04, freq: 5200, q: 2, pico: p % 4 === 0 ? 0.16 : 0.07, destino });
+  else if (e.chimbal === 'colcheia' && p % 2 === 0) chiado({ t, dur: 0.05, freq: 6500, q: 3, pico: 0.1, destino });
   // baixo
   if (p === 0 || p === 8) tom({ freq: acorde[0] / 2, tipo: 'triangle', t, dur: 0.4, pico: 0.5, destino });
-  // sanfona: acorde curto no contratempo
-  if (p === 4 || p === 12) for (const f of acorde) tom({ freq: f * 2, tipo: 'sawtooth', t, dur: 0.18, pico: 0.05, ataque: 0.02, destino, filtro: 1800 });
+  // sanfona / cavaquinho: acorde curto
+  if (e.acorde.includes(p)) for (const f of acorde) tom({ freq: f * 2, tipo: 'sawtooth', t, dur: 0.18, pico: 0.05, ataque: 0.02, destino, filtro: 1800 });
+  // viola caipira: dedilhado do acorde em terças
+  if (e.arpejo && p % 2 === 1) dedilhar(acorde[((p - 1) / 2) % 3] * 2, t, 0.5, 0.08, destino);
   // melodia
-  const nota = MELODIA[passo % 32];
-  if (p % 2 === 0 && nota >= 0) dedilhar(ESCALA[nota], t, 0.35, 0.12, destino);
+  const nota = e.melodia[passo % 32];
+  if (p % 2 === 0 && nota >= 0) dedilhar(e.escala[nota], t, 0.35, 0.12, destino);
 }
 
 // ---------- vozes ----------
@@ -262,6 +291,8 @@ export const audio = {
     if ((opcoes.mudo || !opcoes.vozes) && 'speechSynthesis' in window) speechSynthesis.cancel();
   },
   get opcoes() { return { ...opcoes }; },
+  // Ritmo de fundo (Bazar): baiao, forro, xote, samba, viola
+  musica(id) { estilo = ESTILOS[id] ?? ESTILOS.baiao; },
   tocar(nome, arg) {
     if (!ctx || ctx.state !== 'running' || opcoes.mudo || !opcoes.efeitos) return;
     try { EFEITOS[nome]?.(arg); } catch { /* som nunca derruba o jogo */ }

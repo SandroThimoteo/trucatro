@@ -197,8 +197,10 @@ export class Jogo {
     const s = this.rng.stream('promessa');
     const p = clone(s.pick(this.dados.regras.promessas));
     if (p.tipo === 'comparsa') {
-      const opcoes = this.dados.comparsas.filter((c) => c.raridade === p.raridade && !this.run.comparsas.some((x) => x.id === c.id));
-      p.id = (opcoes.length ? s.pick(opcoes) : s.pick(this.dados.comparsas)).id;
+      const livres = this.dados.comparsas.filter((c) => !this.run.comparsas.some((x) => x.id === c.id));
+      const daRaridade = livres.filter((c) => c.raridade === p.raridade);
+      if (!livres.length) return this.promessaReis();
+      p.id = s.pick(daRaridade.length ? daRaridade : livres).id;
       p.descricao = `Comparsa grátis: ${this.dados.comparsasPorId[p.id].nome}`;
     } else if (p.tipo === 'simpatia') {
       p.id = s.pick(this.dados.simpatias).id;
@@ -210,13 +212,22 @@ export class Jogo {
     return p;
   }
 
+  promessaReis() {
+    return clone(this.dados.regras.promessas.find((x) => x.tipo === 'reis'));
+  }
+
   pularMesa() {
     const r = this.run;
     if (r.fase !== 'mapa' || !r.promessa) throw new Error('Esta Mesa não pode ser pulada');
-    const p = r.promessa;
+    let p = r.promessa;
+    // Sem espaço, ou o Comparsa já está com você: a Promessa vira réis (nunca some nem repete)
+    const semEspaco = (p.tipo === 'comparsa' && (r.comparsas.length >= r.slotsComparsa || r.comparsas.some((c) => c.id === p.id)))
+      || ((p.tipo === 'simpatia' || p.tipo === 'causo') && r.consumiveis.length >= r.slotsConsumivel);
+    if (semEspaco) p = this.promessaReis();
     if (p.tipo === 'reis') r.reis += p.valor;
-    else if (p.tipo === 'comparsa' && r.comparsas.length < r.slotsComparsa) this.adicionarComparsa(p.id);
-    else if ((p.tipo === 'simpatia' || p.tipo === 'causo') && r.consumiveis.length < r.slotsConsumivel) r.consumiveis.push({ tipo: p.tipo, id: p.id });
+    else if (p.tipo === 'comparsa') this.adicionarComparsa(p.id);
+    else r.consumiveis.push({ tipo: p.tipo, id: p.id });
+    r.ultimaPromessa = p;
     r.stats.pulos++;
     r.mesaIdx++;
     this.prepararMapa();
@@ -367,7 +378,7 @@ export class Jogo {
   trocar(ids) {
     const m = this.run.mesa;
     const rd = this.rodada;
-    if (rd?.fase !== 'troca') throw new Error('Só dá pra trocar antes da primeira vaza');
+    if (rd?.fase !== 'troca') throw new Error('Só dá pra trocar antes da primeira rodada');
     if (m.trocasRestantes <= 0) throw new Error('Sem trocas nesta Mesa');
     if (!ids.length || !ids.every((id) => m.mao.includes(id))) throw new Error('Selecione cartas da sua mão');
     m.mao = m.mao.filter((id) => !ids.includes(id));
@@ -651,20 +662,28 @@ export class Jogo {
     return s.pick(daRaridade.length ? daRaridade : livres);
   }
 
-  gerarItensLoja() {
+  // anteriores: ofertas que o jogador acabou de ver (no reroll, evita repetir enquanto houver opção)
+  gerarItensLoja(anteriores = []) {
     const L = this.dados.regras.loja;
     const s = this.rng.stream('loja');
     const itens = [];
-    const excluir = new Set(this.run.comparsas.map((c) => c.id));
+    const viu = new Set(anteriores.filter((it) => it.id).map((it) => it.id));
+    const excluir = new Set([...this.run.comparsas.map((c) => c.id), ...viu]);
     for (let i = 0; i < L.comparsas; i++) {
-      const def = this.sortearComparsa(s, excluir);
+      let def = this.sortearComparsa(s, excluir);
+      if (!def) def = this.sortearComparsa(s, new Set([...this.run.comparsas.map((c) => c.id), ...itens.map((x) => x.id)]));
       if (!def) continue;
       excluir.add(def.id);
       itens.push({ tipo: 'comparsa', id: def.id, preco: def.preco, vendido: false });
     }
+    // Causos e Simpatias: nunca dois iguais na mesma loja
+    const usados = new Set();
     for (let i = 0; i < L.consumiveis; i++) {
       const tipo = s.chance(0.5) ? 'causo' : 'simpatia';
-      const def = s.pick(tipo === 'causo' ? this.dados.causos : this.dados.simpatias);
+      const lista = tipo === 'causo' ? this.dados.causos : this.dados.simpatias;
+      const novos = lista.filter((d) => !usados.has(d.id) && !viu.has(d.id));
+      const def = s.pick(novos.length ? novos : lista.filter((d) => !usados.has(d.id)));
+      usados.add(def.id);
       itens.push({ tipo, id: def.id, preco: def.preco, vendido: false });
     }
     for (let i = 0; i < L.cartas; i++) {
@@ -728,7 +747,7 @@ export class Jogo {
     if (r.reis < r.loja.rerollCusto) throw new Error('Réis insuficientes');
     r.reis -= r.loja.rerollCusto;
     r.loja.rerollCusto += this.dados.regras.economia.rerollIncremento;
-    r.loja.itens = this.gerarItensLoja();
+    r.loja.itens = this.gerarItensLoja(r.loja.itens);
   }
 
   sairDoBoteco() {
@@ -756,7 +775,7 @@ export class Jogo {
     if (item.tipo === 'simpatia') {
       r.niveis[def.jogada] = (r.niveis[def.jogada] ?? 1) + 1;
     } else {
-      if (!this.podeUsarCausoAgora()) throw new Error('Causos só valem na Mesa, antes da primeira vaza');
+      if (!this.podeUsarCausoAgora()) throw new Error('Causos só valem na Mesa, antes da primeira rodada');
       const m = r.mesa;
       if (alvos.length < def.alvosMin || alvos.length > def.alvosMax) {
         throw new Error(def.alvosMin === def.alvosMax ? `Selecione ${def.alvosMin} carta(s)` : `Selecione de ${def.alvosMin} a ${def.alvosMax} cartas`);

@@ -11,6 +11,7 @@ import { proximoValor } from '../core/truco.js';
 import { novoPerfil, normalizarPerfil, comprarItem, equiparItem, itemEquipado, registrarMesa, registrarFimDeRun } from '../core/perfil.js';
 import { esc, fmt, cartaHTML, versoHTML, slotComparsa, infoBtn, avatarHTML, NOME_RARIDADE, NOME_VALOR } from './componentes.js';
 import { audio } from './audio.js';
+import { palcoRodada, palcoMao } from './palco.js';
 import { detectarConta, entrar, convidado, backupLocal, lerBackupLocal } from './conta.js';
 
 const raiz = document.getElementById('app');
@@ -166,12 +167,14 @@ async function abrirConta(conta) {
 // Visual comprado no Bazar: classes no body que mudam variáveis de CSS.
 function aplicarVisual() {
   const b = document.body;
-  for (const c of [...b.classList]) if (/^(verso|frente|toalha)-/.test(c)) b.classList.remove(c);
+  for (const c of [...b.classList]) if (/^(verso|frente|toalha|raio)-/.test(c)) b.classList.remove(c);
   if (!app.perfil) return;
-  for (const cat of ['verso', 'frente', 'toalha']) b.classList.add(itemEquipado(app.dados, app.perfil, cat).classe);
+  for (const cat of ['verso', 'frente', 'toalha', 'raio']) b.classList.add(itemEquipado(app.dados, app.perfil, cat).classe);
+  audio.musica(itemEquipado(app.dados, app.perfil, 'musica').musica);
 }
 
 const equipado = (cat) => itemEquipado(app.dados, app.perfil, cat);
+const meuAvatar = () => (app.perfil ? equipado('avatar').avatar : '🙂');
 const pick = (lista) => lista[Math.floor(Math.random() * lista.length)];
 
 // ---------- efeitos visuais ----------
@@ -198,54 +201,42 @@ async function carimbo(texto, sub = '') {
   document.querySelector('.toalha')?.classList.remove('treme');
 }
 
-function pular(uid) {
-  const el = document.querySelector(`.slot[data-uid="${uid}"]`);
-  if (!el) return;
-  el.classList.remove('pulo');
-  void el.offsetWidth;
-  el.classList.add('pulo');
-}
-
 function desenharConta() {
   const el = document.getElementById('conta');
   if (el) el.outerHTML = contaHTML();
 }
 
+const MS_PALCO = reduzido
+  ? { entrada: 80, passo: 60, raio: 90, total: 300 }
+  : { entrada: 420, passo: 380, raio: 620, total: 900 };
+
+function nomeComparsa(uid) {
+  const inst = app.jogo?.run.comparsas.find((c) => c.uid === uid);
+  return inst ? app.dados.comparsasPorId[inst.id].nome : null;
+}
+
+// Rodada vencida: a carta vai para o centro e os Comparsas soltam raios nela (ui/palco.js)
 async function animarVaza(ev) {
-  let i = 0;
-  for (const p of ev.passos) {
-    app.conta = { jogada: app.dados.jogadas[ev.jogada].nome, fichas: p.fichas, mult: p.mult, origem: legendaPasso(p), total: null };
-    desenharConta();
-    if (p.comparsa) pular(p.comparsa);
-    audio.tocar('ponto', i++);
-    document.querySelector(`#conta .caixa.${p.tipo === 'fichas' ? 'f' : 'm'}`)?.classList.add('pop');
-    await sleep(VEL.passo);
-  }
-  app.conta = { ...app.conta, total: ev.total, origem: ev.total === 0 ? 'Não pontuou' : 'Vaza guardada' };
+  const nomeJogada = app.dados.jogadas[ev.jogada].nome;
+  const ctx = app.jogo?.rodada?.vira ? app.jogo.ctxForca() : null;
+  await palcoRodada(ev, {
+    cartaHtml: cartaHTML(ev.carta, { ctx, estatica: true }),
+    nomeJogada: ev.fuga ? `${nomeJogada} (fuga)` : nomeJogada,
+    nomeComparsa,
+    ms: MS_PALCO,
+  });
+  const ultimo = ev.passos[ev.passos.length - 1];
+  app.conta = { jogada: nomeJogada, fichas: ultimo?.fichas, mult: ultimo?.mult, origem: ev.total === 0 ? 'Não pontuou' : 'Rodada guardada', total: ev.total };
   desenharConta();
-  document.querySelector('#conta .total')?.classList.add('pop');
-  await sleep(VEL.total);
 }
 
-function legendaPasso(p) {
-  if (p.tipo === 'fichas') return `+${p.valor} Fichas · ${p.origem}`;
-  if (p.tipo === 'mult') return `+${p.valor} Mult · ${p.origem}`;
-  if (p.tipo === 'xmult') return `×${p.valor} Mult · ${p.origem}`;
-  if (p.tipo === 'anula') return `${p.origem}: não pontua`;
-  if (p.tipo === 'metade') return `${p.origem}: vale ${p.valor === 0.5 ? 'metade' : `×${p.valor}`}`;
-  return p.origem;
-}
-
+// Fim da mão: soma das rodadas, bônus e o multiplicador do truco, um por um
 async function animarMao(ev) {
-  let i = 0;
-  for (const p of ev.passos) {
-    if (p.comparsa) pular(p.comparsa);
-    audio.tocar('ponto', 4 + i++);
-    app.conta = { jogada: 'Fim da mão', fichas: null, mult: null, origem: p.tipo === 'x' ? `×${p.valor} · ${p.origem}` : `+${fmt(p.valor)} · ${p.origem}`, total: p.total };
-    desenharConta();
-    document.querySelector('#conta .total')?.classList.add('pop');
-    await sleep(VEL.passo * 1.6);
-  }
+  if (!ev.passos.length) return;
+  await palcoMao(ev, { titulo: ev.valor > 1 ? `Mão valendo ${ev.valor}` : 'Fim da mão', nomeComparsa, ms: MS_PALCO });
+  const ultimo = ev.passos[ev.passos.length - 1];
+  app.conta = { jogada: 'Fim da mão', fichas: null, mult: null, origem: `+${fmt(ultimo.total)} na Mesa`, total: ultimo.total };
+  desenharConta();
 }
 
 function vozDe(pessoaId) {
@@ -322,12 +313,15 @@ async function executar(fn, { limparSel = true } = {}) {
   app.ocupado = true;
   try {
     coletarClassico();
+    // Com animação na fila, o resultado (fim de mão/Mesa) só aparece depois dela
+    app.animando = app.fila.length > 0;
     render();
     await tocarFila();
     while (app.jogo && app.tela === 'jogo' && app.jogo.iaPrecisaAgir()) {
       render();
       await sleep(VEL.ia);
       app.jogo.passoIA();
+      app.animando = app.fila.length > 0;
       render();
       await tocarFila();
     }
@@ -500,6 +494,14 @@ const acoes = {
   },
   ouvir(id) {
     const item = app.dados.bazarPorId[id];
+    if (item.musica) {
+      audio.destravar();
+      audio.musica(item.musica);
+      toast(`Tocando ${item.nome} por alguns segundos`);
+      clearTimeout(app.timerPrevia);
+      app.timerPrevia = setTimeout(() => audio.musica(equipado('musica').musica), 12000);
+      return;
+    }
     const texto = item.categoria === 'falaTruco' ? item.falas.pedir[0] : item.falas[0];
     audio.falar(texto, VOZ_JOGADOR);
     if (!audio.temVoz()) toast('Este navegador não tem voz sintetizada');
@@ -507,7 +509,12 @@ const acoes = {
 
   // mapa
   sentar() { executar(() => app.jogo.iniciarMesa()); },
-  pularMesa() { executar(() => app.jogo.pularMesa()); },
+  pularMesa() {
+    executar(() => {
+      app.jogo.pularMesa();
+      toast(`Promessa recebida: ${app.jogo.run.ultimaPromessa.descricao}`);
+    });
+  },
 
   // mesa
   carta(id) {
@@ -675,6 +682,22 @@ document.addEventListener('keydown', (e) => {
     app.modal = null;
     app.detalhe = null;
     render();
+    return;
+  }
+  if (app.modal || app.ocupado || e.ctrlKey || e.metaKey || e.altKey || /INPUT|TEXTAREA/.test(document.activeElement?.tagName)) return;
+  if (app.tela !== 'jogo' && app.tela !== 'classico') return;
+  const clicar = (sel) => {
+    const b = raiz.querySelector(sel);
+    if (b && !b.disabled) { b.click(); return true; }
+    return false;
+  };
+  if (/^[1-5]$/.test(e.key)) {
+    const cartas = raiz.querySelectorAll('.mao .carta');
+    cartas[Number(e.key) - 1]?.click();
+  } else if (e.key.toLowerCase() === 't') {
+    clicar('[data-acao="truco"]') || clicar('[data-acao="responder"][data-arg="aumentar"]');
+  } else if (e.key === 'Enter' && document.activeElement === document.body) {
+    clicar('.sobreposto .btn.amarelo') || clicar('.mao-area .btn.amarelo:not([disabled])');
   }
 });
 
@@ -729,7 +752,8 @@ function chipConta() {
   else if (u.conta.tipo === 'servidor' || u.conta.tipo === 'online') quem = `<span>Jogador: <b>${esc(u.conta.nome)}</b>${u.conta.admin ? ' <span class="selo-admin">admin</span>' : ''}</span><button class="btn fantasma peq acao" data-acao="sairConta">Sair</button>`;
   else if (u.backend) quem = '<span>Sem conta (salva só neste aparelho)</span><button class="btn amarelo peq acao" data-acao="irLogin">Entrar</button>';
   else quem = '<span>Progresso salvo neste aparelho</span>';
-  return `<div class="chip-conta">${quem}${moeda}${app.salvoErro ? '<span class="aviso">Sem conexão: salvo só aqui por enquanto</span>' : ''}</div>`;
+  const eu = `<span class="eu"><span class="avatar-mini" aria-hidden="true">${esc(meuAvatar())}</span>${esc(equipado('titulo').nome)}</span>`;
+  return `<div class="chip-conta">${eu}${quem}${moeda}${app.salvoErro ? '<span class="aviso">Sem conexão: salvo só aqui por enquanto</span>' : ''}</div>`;
 }
 
 function telaLogin() {
@@ -843,6 +867,10 @@ function previewItem(item) {
   if (item.categoria === 'verso') return `<div class="${item.classe} preview">${versoHTML({ mini: false })}</div>`;
   if (item.categoria === 'frente') return `<div class="${item.classe} preview">${cartaHTML({ id: 'p1', rank: 'A', suit: 'espadas' }, { estatica: true })}${cartaHTML({ id: 'p2', rank: '7', suit: 'copas' }, { estatica: true })}</div>`;
   if (item.categoria === 'toalha') return `<div class="${item.classe} preview"><div class="toalha amostra"></div></div>`;
+  if (item.categoria === 'raio') return `<div class="${item.classe} preview raio-preview"><svg viewBox="0 0 200 110" aria-hidden="true"><polyline class="raio brilho" points="10,20 60,45 45,58 110,70 95,82 190,95"/><polyline class="raio nucleo" points="10,20 60,45 45,58 110,70 95,82 190,95"/></svg></div>`;
+  if (item.categoria === 'musica') return `<div class="preview"><span class="nota-musical" aria-hidden="true">♪♫</span><p class="citacao">${esc(item.nome)}</p></div>`;
+  if (item.categoria === 'avatar') return `<div class="preview"><span class="avatar-grande" aria-hidden="true">${esc(item.avatar)}</span></div>`;
+  if (item.categoria === 'titulo') return `<div class="preview"><span class="faixa-titulo">${esc(item.nome)}</span></div>`;
   if (item.categoria === 'falaTruco') return `<div class="preview"><span class="carimbo-mini">${esc(item.carimbo)}</span><p class="citacao">“${esc(item.falas.pedir[0])}”</p></div>`;
   return `<div class="preview"><p class="citacao">${item.falas.map((f) => `“${esc(f)}”`).join('<br>')}</p></div>`;
 }
@@ -859,7 +887,7 @@ function telaBazar() {
     if (usando) botao = '<span class="equipado">Usando</span>';
     else if (tem) botao = `<button class="btn peq acao" data-acao="equiparBazar" data-arg="${item.id}">Usar</button>`;
     else botao = `<button class="btn amarelo peq acao" data-acao="comprarBazar" data-arg="${item.id}" ${p.tampinhas < item.preco ? 'disabled' : ''}>Comprar</button>`;
-    const ouvir = item.falas ? `<button class="btn fantasma-escuro peq acao" data-acao="ouvir" data-arg="${item.id}">Ouvir</button>` : '';
+    const ouvir = item.falas || item.musica ? `<button class="btn fantasma-escuro peq acao" data-acao="ouvir" data-arg="${item.id}">Ouvir</button>` : '';
     return `<div class="ficha item-bazar ${usando ? 'escolhida' : ''}">
       ${previewItem(item)}
       <h3>${esc(item.nome)}</h3>
@@ -994,7 +1022,7 @@ function painelColecaoRun(j, loja) {
   </div>`;
 }
 
-function slotsComparsas(j, loja = false) {
+function slotsComparsas(j, loja = false, compacto = false) {
   const r = j.run;
   const html = r.comparsas.map((inst, i) => {
     const def = app.dados.comparsasPorId[inst.id];
@@ -1004,11 +1032,11 @@ function slotsComparsas(j, loja = false) {
       <button class="btn peq acao" data-acao="vender" data-arg="${inst.uid}">Vender ${j.precoVenda(inst.uid)}</button></div>` : '';
     return slotComparsa(def, inst, extras);
   });
-  for (let i = r.comparsas.length; i < r.slotsComparsa; i++) html.push('<div class="slot vazio">Comparsa</div>');
-  return `<div class="slots" aria-label="Comparsas">${html.join('')}</div>`;
+  if (!compacto) for (let i = r.comparsas.length; i < r.slotsComparsa; i++) html.push('<div class="slot vazio">Comparsa</div>');
+  return `<div class="slots ${compacto ? 'compacto' : ''}" aria-label="Comparsas (${r.comparsas.length} de ${r.slotsComparsa})">${html.join('')}</div>`;
 }
 
-function slotsConsumiveis(j) {
+function slotsConsumiveis(j, compacto = false) {
   const r = j.run;
   const html = r.consumiveis.map((item, i) => {
     const def = defConsumivel(app.dados, item);
@@ -1018,12 +1046,12 @@ function slotsConsumiveis(j) {
       <span class="raridade" style="background:${item.tipo === 'causo' ? '#8a5a2b' : '#5c4a8a'}">${item.tipo === 'causo' ? 'Causo' : 'Simpatia'}</span>
       <b>${esc(def.nome)}</b><span>${esc(def.descricao)}</span>
       <div class="acoes-slot">
-        <button class="btn peq acao" data-acao="usar" data-arg="${i}" ${podeUsar ? '' : 'disabled'} title="${item.tipo === 'causo' ? 'Selecione as cartas da mão e use antes da 1ª vaza' : ''}">Usar</button>
+        <button class="btn peq acao" data-acao="usar" data-arg="${i}" ${podeUsar ? '' : 'disabled'} title="${item.tipo === 'causo' ? 'Selecione as cartas da mão e use antes da 1ª rodada' : ''}">Usar</button>
         <button class="btn peq fantasma acao" data-acao="descartarConsumivel" data-arg="${i}" style="color:var(--tinta);box-shadow:inset 0 0 0 2px rgba(0,0,0,.2)" aria-label="Descartar">✕</button>
       </div></div>`;
   });
-  for (let i = r.consumiveis.length; i < r.slotsConsumivel; i++) html.push('<div class="slot vazio">Causo ou Simpatia</div>');
-  return `<div class="slots cons" aria-label="Consumíveis">${html.join('')}</div>`;
+  if (!compacto) for (let i = r.consumiveis.length; i < r.slotsConsumivel; i++) html.push('<div class="slot vazio">Causo ou Simpatia</div>');
+  return `<div class="slots cons ${compacto ? 'compacto' : ''}" aria-label="Causos e Simpatias">${html.join('')}</div>`;
 }
 
 // ---------- mesa ----------
@@ -1033,7 +1061,7 @@ function contaHTML() {
   return `<div class="conta" id="conta" aria-live="polite">
     <div class="jogada">${esc(c?.jogada ?? 'Fichas × Mult')}</div>
     <div class="fxm"><div class="caixa f">${c?.fichas != null ? fmt(c.fichas) : '—'}</div><span class="num">×</span><div class="caixa m">${c?.mult != null ? c.mult : '—'}</div></div>
-    <div class="origem">${esc(c?.origem ?? 'Vença vazas para pontuar')}</div>
+    <div class="origem">${esc(c?.origem ?? 'Vença rodadas para pontuar')}</div>
     <div class="total">${c?.total != null ? fmt(c.total) : ''}</div>
   </div>`;
 }
@@ -1044,11 +1072,11 @@ function lousaMesa(j) {
   const p = j.pessoa;
   const perc = Math.min(100, (m.pontos / m.meta) * 100);
   return `<aside class="lousa" aria-label="Placar">
-    <div class="rotulo">Bairro ${r.bairro} · ${esc(j.nomeBairro())} · ${NOME_MESA[m.tipo]}</div>
-    <div class="pessoa-cab giz">${avatarHTML(p)}<div><h2>${esc(p.nome)}</h2><div class="sub">${esc(p.titulo)}</div></div></div>
+    <div class="rotulo">Bairro ${r.bairro} · ${esc(j.nomeBairro())}</div>
+    <h2 class="titulo-mesa">${NOME_MESA[m.tipo]}</h2>
     <div class="regra-chefao ${j.chefao ? '' : 'manha-giz'}">${infoBtn('pessoa', p.id, p.nome)}<b>${j.chefao ? 'Regra do Chefão' : 'Manha'}:</b> ${esc(p.regra)}</div>
     <div class="linha-giz" style="display:block">
-      <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="rotulo">Pontos / Meta</span><span class="num">${fmt(m.pontos)} / ${fmt(m.meta)}</span></div>
+      <div class="meta-linha"><span class="rotulo">Pontos / Meta</span><span class="num">${fmt(m.pontos)} / ${fmt(m.meta)}</span></div>
       <div class="barra" role="progressbar" aria-valuenow="${Math.round(perc)}" aria-valuemin="0" aria-valuemax="100"><i style="width:${perc}%"></i></div>
     </div>
     <div class="stats">
@@ -1093,7 +1121,7 @@ function vazasHTML(rd, ctx, nomeAdv) {
         <div class="par">${dele ? cartaHTML(dele.carta, { ctx, mini: true, estatica: true, entra: true }) : '<div class="carta mini verso" style="opacity:.15"></div>'}${minha ? cartaHTML(minha.carta, { ctx, mini: true, estatica: true, entra: true }) : '<div class="carta mini verso" style="opacity:.15"></div>'}</div>
         <span class="quem-joga">${quem}</span></div>`);
     } else {
-      slots.push(`<div class="vaza"><span class="quem-joga" style="margin:auto">${i + 1}ª vaza</span></div>`);
+      slots.push(`<div class="vaza"><span class="quem-joga" style="margin:auto">${i + 1}ª rodada</span></div>`);
     }
   }
   return `<div class="vazas" style="--n:${n}">${slots.join('')}</div>`;
@@ -1112,7 +1140,7 @@ function acoesMesa(j) {
   if (rd.fase === 'vira') {
     dica = 'Vira-Lata: escolha qual vira vale nesta mão.';
   } else if (rd.fase === 'troca') {
-    dica = rd.onze ? 'Mão de onze: vale 3, sem truco.' : rd.iniciante === 0 ? 'Você abre. Toque numa carta para selecionar e de novo para jogar. Para trocar, selecione 1, 2 ou 3 cartas.' : `${nome} abre esta mão. Se quiser, troque cartas antes.`;
+    dica = rd.onze ? 'Mão de onze: vale 3, sem truco.' : rd.iniciante === 0 ? 'Você abre. Toque 2 vezes numa carta para jogar, ou marque até 3 e troque.' : `${nome} abre. Quer trocar cartas antes?`;
     if (m.trocasRestantes > 0) botoes.push(`<button class="btn acao" data-acao="trocar" ${n ? '' : 'disabled'}>Trocar ${n || ''} (${m.trocasRestantes})</button>`);
     if (rd.iniciante === 0) botoes.push(`<button class="btn amarelo acao" data-acao="jogar" ${n === 1 ? '' : 'disabled'}>Jogar carta</button>`);
     else botoes.push('<button class="btn amarelo acao" data-acao="abrir">Pronto, pode abrir</button>');
@@ -1127,15 +1155,34 @@ function acoesMesa(j) {
     } else if (st.pedido) {
       dica = 'Esperando a resposta...';
     } else if (st.vez === 0) {
-      dica = 'Sua vez. Toque numa carta e de novo para jogar.';
+      dica = 'Sua vez: toque numa carta e toque de novo para jogar.';
       botoes.push(`<button class="btn amarelo acao" data-acao="jogar" ${n === 1 ? '' : 'disabled'}>Jogar carta</button>`);
       if (j.podePedirTruco()) botoes.push(`<button class="btn truco acao" data-acao="truco">${NOME_VALOR[proximoValor(st.valor, st.valores)]}</button>`);
     } else {
-      dica = `${nome} está pensando...`;
+      dica = `${nome} está pensando`;
     }
   }
   if (benz) botoes.push('<button class="btn fantasma acao" data-acao="benzer">Benzer (revelar cartas)</button>');
   return { botoes: botoes.join(''), dica };
+}
+
+function minhaVez(j) {
+  const rd = j.rodada;
+  if (!rd || app.animando) return false;
+  if (rd.fase === 'troca') return true;
+  const st = rd.mao;
+  return rd.fase === 'jogo' && !st.fim && (st.pedido ? st.pedido.por === 1 : st.vez === 0);
+}
+
+// Bolinhas das 3 rodadas: verde (sua), vermelha (dele), cinza (cangou), vazia (falta jogar)
+function placarRodadas(rd) {
+  const vazas = rd.mao?.vazas ?? [];
+  const bolas = Array.from({ length: rd.numVazas }, (_, i) => {
+    const v = vazas[i]?.vencedor;
+    const [classe, rotulo] = v === 0 ? ['v', 'sua'] : v === 1 ? ['p', 'dele'] : v === 'empate' ? ['e', 'cangou'] : ['', 'a jogar'];
+    return `<i class="bola ${classe}" title="${i + 1}ª rodada: ${rotulo}"></i>`;
+  }).join('');
+  return `<span class="bolas" aria-label="Rodadas">${bolas}</span>`;
 }
 
 function valorInicial(j) {
@@ -1223,23 +1270,31 @@ function telaMesa() {
   const mao = minhas.map((c) => cartaHTML(c, { ctx, sel: app.sel.includes(c.id), dados: app.dados })).join('');
   const { botoes, dica } = acoesMesa(j);
   const valor = st ? st.valor : valorInicial(j);
+  const suaVez = minhaVez(j);
+  const pensando = rd.fase === 'jogo' && !st.fim && (st.pedido ? st.pedido.por === 0 : st.vez === 1);
+  const temItens = r.comparsas.length || r.consumiveis.length;
 
   return `<div class="mesa-layout">
     ${lousaMesa(j)}
     <div class="mesa-centro">
-      <div class="faixa">${slotsComparsas(j)}${slotsConsumiveis(j)}</div>
+      ${temItens ? `<div class="faixa compacta">${slotsComparsas(j, false, true)}${slotsConsumiveis(j, true)}</div>` : ''}
       <section class="toalha" aria-label="Mesa">
         <div class="adversario">
           <div class="quem">${avatarHTML(pessoa, true)}<div><span class="rotulo" style="color:var(--papel)">${esc(pessoa.titulo)}</span><h3>${esc(pessoa.nome)}</h3></div></div>
-          ${rd.fala ? `<div class="fala">${esc(rd.fala)}</div>` : ''}
+          ${rd.fala ? `<div class="fala">${esc(rd.fala)}</div>` : pensando ? '<div class="fala pensando" aria-label="pensando"><i></i><i></i><i></i></div>' : ''}
           <div class="cartas-adv">${adv}</div>
           <div class="vira-box"><span class="rotulo">Vira</span>${vira}</div>
         </div>
         ${vazasHTML(rd, ctx, pessoa.nome)}
-        <div class="valendo"><span class="rotulo" style="color:var(--papel)">Mão ${m.maoIdx + 1}${rd.onze ? ' · mão de onze' : ''} · valendo</span><span class="num">${valor}</span></div>
+        <div class="valendo">
+          <span class="rotulo" style="color:var(--papel)">Mão ${m.maoIdx + 1}${rd.onze ? ' · mão de onze' : ''}</span>
+          ${placarRodadas(rd)}
+          <span class="rotulo" style="color:var(--papel)">valendo</span><span class="num">${valor}</span>
+        </div>
       </section>
-      <section class="mao-area" aria-label="Sua mão">
-        ${app.falaJogador ? `<div class="fala jogador">${esc(app.falaJogador)}</div>` : ''}
+      <section class="mao-area ${suaVez ? 'sua-vez' : ''}" aria-label="Sua mão">
+        ${suaVez ? '<span class="selo-vez">Sua vez</span>' : ''}
+        ${app.falaJogador ? `<div class="fala jogador"><span class="avatar-mini" aria-hidden="true">${esc(meuAvatar())}</span>${esc(app.falaJogador)}</div>` : ''}
         <div class="mao">${mao}</div>
         <div class="dica">${esc(dica)}</div>
         <div class="botoes">${botoes}</div>
@@ -1436,7 +1491,7 @@ function detalheConteudo({ tipo, id }) {
     const agora = valoresJogada(d, niveis, s.jogada);
     const depois = valoresJogada(d, { ...(niveis ?? {}), [s.jogada]: n + 1 }, s.jogada);
     const txt = s.jogada === 'cangada'
-      ? `+${agora.multProxima} → +${depois.multProxima} Mult na próxima vaza`
+      ? `+${agora.multProxima} → +${depois.multProxima} Mult na próxima rodada`
       : `${agora.fichas} × ${agora.mult} → ${depois.fichas} × ${depois.mult}`;
     return blocoDetalhe('Simpatia', s.nome, s.descricao, `Sobe a Jogada "${jog.nome}" (${jog.descricao.toLowerCase()}) do nível ${n} para o ${n + 1}. Fichas × Mult da Jogada: ${txt}. Pode usar a qualquer momento; o nível vale até o fim da run.`);
   }
@@ -1487,7 +1542,7 @@ function modalHTML() {
   } else if (app.modal === 'jogadas') {
     titulo = 'Jogadas';
     larga = true;
-    corpo = `<p class="rotulo">Cada vaza vencida é uma Jogada. A pontuação é Fichas × Mult; Simpatias sobem o nível.</p>${tabelaJogadas(app.jogo?.run.niveis ?? null)}`;
+    corpo = `<p class="rotulo">Cada rodada vencida é uma Jogada. A pontuação é Fichas × Mult; Simpatias sobem o nível.</p>${tabelaJogadas(app.jogo?.run.niveis ?? null)}`;
   } else if (app.modal === 'sair') {
     titulo = 'Sair da run?';
     corpo = '<p>A run atual será apagada.</p><div class="botoes"><button class="btn truco acao" data-acao="abandonar">Sair e apagar</button><button class="btn fantasma acao" data-acao="fecharModal">Continuar jogando</button></div>';
@@ -1503,19 +1558,19 @@ function modalHTML() {
     larga = true;
     corpo = `
       <p><b>Truco Paulista.</b> Baralho de 40 cartas (sem 8, 9, 10). Força: 4 &lt; 5 &lt; 6 &lt; 7 &lt; Q &lt; J &lt; K &lt; A &lt; 2 &lt; 3. A carta seguinte à <b>vira</b> é a <b>manilha</b>, que vence tudo: Pica-fumo (♦) &lt; Espadilha (♠) &lt; Copas (♥) &lt; Zap (♣).</p>
-      <p><b>Mão:</b> melhor de 3 vazas. Empate (cangou) na 1ª: decide a 2ª. Ganhou a 1ª e cangou a 2ª: leva quem ganhou a 1ª.</p>
+      <p><b>Mão:</b> melhor de 3 rodadas. Empate (cangou) na 1ª: decide a 2ª. Ganhou a 1ª e cangou a 2ª: leva quem ganhou a 1ª.</p>
       <p><b>Truco:</b> a mão vale 1 e o truco sobe para 3, 6, 9 e 12. Quem recebe pode aceitar, correr ou aumentar.</p>
-      <p><b>Na run:</b> você enfrenta 3 pessoas por bairro, em 8 bairros. Cada uma tem uma meta de pontos, um número de mãos e uma <b>manha</b>: uma regra só daquela Mesa. Você recebe 3 cartas e, antes da 1ª vaza, pode trocar 1, 2 ou as 3 (cada troca gasta 1 das trocas da Mesa). Se perde a mão, não leva nada; se o seu truco foi aceito e você perdeu, perde uma mão extra. Se o adversário corre do seu truco, sua melhor carta pontua como uma vaza vencida.</p>
+      <p><b>Na run:</b> você enfrenta 3 pessoas por bairro, em 8 bairros. Cada uma tem uma meta de pontos, um número de mãos e uma <b>manha</b>: uma regra só daquela Mesa. Você recebe 3 cartas e, antes da 1ª rodada, pode trocar 1, 2 ou as 3 (cada troca gasta 1 das trocas da Mesa). Se perde a mão, não leva nada; se o seu truco foi aceito e você perdeu, perde uma mão extra. Se o adversário corre do seu truco, sua melhor carta pontua como uma rodada vencida.</p>
       <p>A última mão de cada Mesa é a <b>mão de onze</b>: vale 3, sem truco.</p>
       <h3 class="secao-giz">Glossário</h3>
       <dl class="glossario">
-        <dt>Fichas × Mult</dt><dd>A conta de cada vaza vencida. Fichas vêm da carta (Ás = 10, 3 = 15, manilha = 20, Zap = 30) e da Jogada; Mult vem da Jogada e dos bônus. Depois a mão é multiplicada pelo valor do truco.</dd>
-        <dt>Jogada</dt><dd>O jeito que você venceu a vaza: Vaza Simples, Matar Seco, Manilhada, Zapada... Cada uma tem Fichas e Mult próprios. Veja em "Jogadas".</dd>
-        <dt>Manha</dt><dd>A regra de cada pessoa da Mesa (Seu Joaquim dá réis por vaza, Rita Navalha tira uma troca...). Chefões têm regras mais duras.</dd>
+        <dt>Fichas × Mult</dt><dd>A conta de cada rodada vencida. Fichas vêm da carta (Ás = 10, 3 = 15, manilha = 20, Zap = 30) e da Jogada; Mult vem da Jogada e dos bônus. Depois a mão é multiplicada pelo valor do truco.</dd>
+        <dt>Jogada</dt><dd>O jeito que você venceu a rodada: Rodada Simples, Matar Seco, Manilhada, Zapada... Cada uma tem Fichas e Mult próprios. Veja em "Jogadas".</dd>
+        <dt>Manha</dt><dd>A regra de cada pessoa da Mesa (Seu Joaquim dá réis por rodada, Rita Navalha tira uma troca...). Chefões têm regras mais duras.</dd>
         <dt>Réis</dt><dd>Dinheiro da run. Ganha vencendo Mesas; gasta no Boteco. Cada 5 réis guardados rendem 1 de juros (até 5). Some quando a run acaba.</dd>
         <dt>Tampinhas</dt><dd>Moeda que fica com você para sempre. Só Chefões deixam cair, cada um um valor. Gaste no Bazar das Tampinhas em visual de cartas, toalhas e falas.</dd>
         <dt>Comparsa</dt><dd>Ajudante permanente da run. Fica num slot e dá bônus sozinho. A ordem dos slots importa.</dd>
-        <dt>Causo</dt><dd>Item de uso único que muda cartas do seu baralho para sempre (naipe, melhoria, cópia...). Use antes da 1ª vaza.</dd>
+        <dt>Causo</dt><dd>Item de uso único que muda cartas do seu baralho para sempre (naipe, melhoria, cópia...). Use antes da 1ª rodada.</dd>
         <dt>Simpatia</dt><dd>Item de uso único que sobe o nível de uma Jogada até o fim da run.</dd>
         <dt>Promessa</dt><dd>Prêmio por pular uma Mesa que não é de Chefão.</dd>
       </dl>
@@ -1541,6 +1596,9 @@ async function carregarDados() {
   }));
   return montarDados(raw);
 }
+
+// ?debug expõe o estado no console (window.trucatro) para testar
+if (new URLSearchParams(location.search).has('debug')) window.trucatro = { app, render, executar };
 
 render();
 Promise.all([carregarDados(), detectarConta()])

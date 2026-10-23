@@ -140,7 +140,7 @@ export class MaoContext {
 
 export function pontuarMao({ dados, niveis, vazas, bonus = [], valor = 1, comparsas = [], info = {} }) {
   const ctx = new MaoContext({ fase: 'mao', aumentos: 0, ...info });
-  ctx.somar(vazas.reduce((s, v) => s + v.total, 0), 'Vazas');
+  ctx.somar(vazas.reduce((s, v) => s + v.total, 0), 'Rodadas');
   for (const id of bonus) {
     const vj = valoresJogada(dados, niveis, id);
     ctx.somar(vj.fichas * vj.mult, vj.nome, { fichas: vj.fichas, mult: vj.mult });
