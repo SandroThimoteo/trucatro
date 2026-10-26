@@ -321,8 +321,8 @@
   { "id": "rei_do_truco", "tipo": "chefao", "final": true, "nome": "Rei do Truco", "titulo": "o big boss: dono de todos os botecos", "avatar": "👑", "perfil": "rei_do_truco", "drop": 12,
     "bio": "Ninguém sabe o nome verdadeiro dele. Só que nunca perdeu uma partida.",
     "regra": "Aumenta todo truco e sempre tem 2 manilhas",
-    "detalhe": "O Rei sempre recebe pelo menos 2 manilhas na mão e, quando pode, aumenta qualquer truco. Para vencer, guarde suas manilhas mais fortes e escolha bem quando aceitar.",
-    "regras": { "aumentaSempre": true, "manilhasGarantidas": 2 },
+    "detalhe": "O Rei já senta com 2 tentos, sempre recebe pelo menos 2 manilhas na mão e, quando pode, aumenta qualquer truco. Para vencer, guarde suas manilhas mais fortes e escolha bem quando aceitar.",
+    "regras": { "aumentaSempre": true, "manilhasGarantidas": 2, "tentosIniciais": 2 },
     "voz": { "tom": 0.55, "vel": 0.85, "genero": "m" },
     "falas": {
       "intro": ["Oito bairros. Oito botecos. Todos são meus.","Ninguém nunca chegou até a minha mesa.","Ajoelha, pega suas cartas... e reza."],

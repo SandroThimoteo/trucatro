@@ -1,11 +1,11 @@
 // Junta os arquivos JSON de /data num objeto de consulta.
 
-export const ARQUIVOS_DADOS = ['cartas', 'jogadas', 'regras', 'comparsas', 'consumiveis', 'adversarios', 'personagens', 'baralhos', 'bazar', 'eventos'];
+export const ARQUIVOS_DADOS = ['cartas', 'jogadas', 'regras', 'comparsas', 'consumiveis', 'adversarios', 'personagens', 'baralhos', 'bazar', 'eventos', 'jogadores'];
 
 const porId = (lista) => Object.fromEntries(lista.map((x) => [x.id, x]));
 
 export function montarDados(raw) {
-  const { cartas, jogadas, regras, comparsas, consumiveis, adversarios, personagens, baralhos, bazar, eventos } = raw;
+  const { cartas, jogadas, regras, comparsas, consumiveis, adversarios, personagens, baralhos, bazar, eventos, jogadores } = raw;
   const chefoes = personagens.filter((p) => p.tipo === 'chefao');
   return {
     cartas,
@@ -30,6 +30,8 @@ export function montarDados(raw) {
     bazarPorId: porId(bazar.itens),
     eventos,
     eventosPorId: porId(eventos.eventos),
+    jogadores,
+    jogadoresPorId: porId(jogadores),
   };
 }
 

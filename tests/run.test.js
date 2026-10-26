@@ -140,7 +140,9 @@ test('adversário corre: sua melhor carta pontua como vaza (fuga)', () => {
     if (rd.fase === 'fim' && rd.resultado.correu === 1) {
       const fuga = rd.vazasPontuadas.find((v) => v.fuga);
       assert.ok(fuga);
-      assert.equal(rd.resultado.pontos, fuga.total, 'vale 1: sem multiplicar');
+      const fujao = dados.jogadas.fujao.fichas * dados.jogadas.fujao.mult;
+      assert.equal(rd.resultado.pontos, fuga.total + fujao, 'vale 1: melhor carta + jogada Fujão, sem multiplicar');
+      assert.ok(rd.resultado.bonus.includes('fujao'));
       assert.ok(fuga.total > 0);
       achou = true;
     }

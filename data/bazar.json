@@ -2,6 +2,7 @@
   "moeda": {"nome": "Tampinhas", "singular": "Tampinha", "descricao": "Moeda que fica com você entre as runs. Só os Chefões deixam cair Tampinhas, e cada um paga um valor diferente. Gaste no Bazar em visual de cartas, toalhas e falas."},
   "recompensas": {"porBairro": 1, "vitoriaRun": 10},
   "categorias": [
+    {"id": "personagem", "nome": "Personagem", "descricao": "Quem você joga na run. Cada um tem um poder que pode usar algumas vezes por Mesa."},
     {"id": "verso", "nome": "Verso das cartas", "descricao": "O desenho das costas das cartas (as do adversário e o monte)."},
     {"id": "frente", "nome": "Frente das cartas", "descricao": "O papel e a tinta das suas cartas."},
     {"id": "toalha", "nome": "Toalha da mesa", "descricao": "O pano onde as rodadas são jogadas."},
@@ -133,6 +134,12 @@
     {"id": "cenario_viuva", "categoria": "cenario", "nome": "Salão da Viúva Negra", "preco": 32, "imagem": "chefe_viuva_negra"},
     {"id": "cenario_lunatico", "categoria": "cenario", "nome": "Observatório do Seu Lunático", "preco": 32, "imagem": "chefe_seu_lunatico"},
     {"id": "cenario_zulmira", "categoria": "cenario", "nome": "Sala de tricô da Tia Zulmira", "preco": 35, "imagem": "chefe_tia_zulmira"},
-    {"id": "cenario_rei", "categoria": "cenario", "nome": "Trono do Rei do Truco", "preco": 60, "imagem": "chefe_rei_do_truco"}
+    {"id": "cenario_rei", "categoria": "cenario", "nome": "Trono do Rei do Truco", "preco": 60, "imagem": "chefe_rei_do_truco"},
+
+    {"id": "jogador_chico_baralho", "categoria": "personagem", "nome": "Chico Baralho", "preco": 0, "jogador": "chico_baralho"},
+    {"id": "jogador_vo_cida", "categoria": "personagem", "nome": "Vó Cida", "preco": 0, "jogador": "vo_cida"},
+    {"id": "jogador_bigode_grosso", "categoria": "personagem", "nome": "Bigode Grosso", "preco": 0, "jogador": "bigode_grosso"},
+    {"id": "jogador_ze_fiado", "categoria": "personagem", "nome": "Zé Fiado", "preco": 30, "jogador": "ze_fiado"},
+    {"id": "jogador_dona_gloria", "categoria": "personagem", "nome": "Dona Glória", "preco": 45, "jogador": "dona_gloria"}
   ]
 }

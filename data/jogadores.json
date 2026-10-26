@@ -1,0 +1,37 @@
+[
+  {
+    "id": "chico_baralho", "nome": "Chico Baralho", "titulo": "carteador de bairro", "avatar": "🃏", "preco": 0,
+    "bio": "Embaralha desde menino e jura que a carta certa sempre aparece.",
+    "poder": { "id": "embaralhada", "nome": "Embaralhada", "gratis": 2, "custo": { "tentos": 1 },
+      "descricao": "No meio da mão, na sua vez: troca 1 carta da mão pela de cima do monte.",
+      "detalhe": "Selecione 1 carta da sua mão na sua vez de jogar e use o poder: ela vai para o descarte e você puxa a de cima do monte. Vale mesmo depois de ver a carta do adversário. 2 usos grátis por Mesa; depois, cada uso dá 1 tento ao adversário." }
+  },
+  {
+    "id": "vo_cida", "nome": "Vó Cida", "titulo": "rezadeira da vila", "avatar": "👵🏽", "preco": 0,
+    "bio": "Benze criança, planta e baralho. Diz que reza forte não falha.",
+    "poder": { "id": "reza_forte", "nome": "Reza Forte", "gratis": 1, "custo": { "reis": 3 },
+      "descricao": "A próxima rodada que você vencer nesta mão ganha ×2 Mult.",
+      "detalhe": "Use antes de jogar: a próxima rodada que você vencer nesta mão tem o Mult dobrado (entra depois dos Comparsas). 1 uso grátis por Mesa; depois custa 3 réis." }
+  },
+  {
+    "id": "bigode_grosso", "nome": "Bigode Grosso", "titulo": "fiscal da feira", "avatar": "🧐", "preco": 0,
+    "bio": "Passa o dia de olho nas barracas. Nada escapa daquele bigode.",
+    "poder": { "id": "olho_vivo", "nome": "Olho Vivo", "gratis": 2, "custo": { "reis": 2 },
+      "descricao": "Mostra 1 carta escondida do adversário até o fim da mão.",
+      "detalhe": "Revela uma carta do adversário que você ainda não viu, até o fim da mão. 2 usos grátis por Mesa; depois custa 2 réis." }
+  },
+  {
+    "id": "ze_fiado", "nome": "Zé Fiado", "titulo": "devedor profissional", "avatar": "🤑", "preco": 30,
+    "bio": "Deve pra metade do bairro e empresta da outra metade.",
+    "poder": { "id": "pendura", "nome": "Pendura", "gratis": 2, "custo": null,
+      "descricao": "Ganha 3 réis na hora, mas o adversário ganha 1 tento.",
+      "detalhe": "Dinheiro rápido: +3 réis agora, e o adversário soma 1 tento (cuidado com os 12). Até 2 vezes por Mesa." }
+  },
+  {
+    "id": "dona_gloria", "nome": "Dona Glória", "titulo": "cartomante da praça", "avatar": "🔮", "preco": 45,
+    "bio": "Lê a sorte nas cartas e, quando não gosta, troca a sorte.",
+    "poder": { "id": "vira_virada", "nome": "Vira Virada", "gratis": 1, "custo": { "tentos": 1 },
+      "descricao": "Antes da 1ª carta: troca a vira por outra (as manilhas mudam).",
+      "detalhe": "Só antes de qualquer carta ser jogada na mão: a vira volta pro monte e sai outra, mudando quais cartas são manilha. 1 uso grátis por Mesa; depois, cada uso dá 1 tento ao adversário." }
+  }
+]

@@ -72,7 +72,7 @@ export class ScoreContext {
 }
 
 // pessoa: personagem da Mesa (chefão ou não), com nome e regras (manha). "chefao" é o nome antigo.
-export function pontuarVaza({ dados, carta, jogada, ctxForca, niveis, comparsas = [], pessoa = null, chefao = pessoa, bonusMult = 0, info = {} }) {
+export function pontuarVaza({ dados, carta, jogada, ctxForca, niveis, comparsas = [], pessoa = null, chefao = pessoa, bonusMult = 0, xMultFinal = null, info = {} }) {
   const ctx = new ScoreContext({
     fase: 'vaza', carta, jogada,
     manilha: isManilha(carta, ctxForca),
@@ -104,6 +104,8 @@ export function pontuarVaza({ dados, carta, jogada, ctxForca, niveis, comparsas 
   }
 
   for (const fase of ['fichas', 'mult', 'xmult']) aplicarFase(ctx, fase, comparsas, dados);
+  // Poder do personagem (Reza Forte): multiplica no fim, depois dos Comparsas
+  if (xMultFinal) ctx.mulMult(xMultFinal.valor, xMultFinal.origem);
 
   let fator = 1;
   if (rm.naipeAnulado === carta.suit) {

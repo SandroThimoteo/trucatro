@@ -25,6 +25,7 @@ export function cartaHTML(c, o = {}) {
   if (man) tag = zap ? 'Zap' : c.rank === manilhaRank(o.ctx.vira) ? MANILHA_NOME[c.suit] : 'Manilha';
   const classes = [
     'carta', vermelha ? 'vermelha' : 'preta', man && 'manilha', zap && 'zap',
+    man && `man-${c.suit}`, o.perdeu && 'perdeu',
     c.melhoria && `mel-${c.melhoria}`, o.sel && 'sel', o.mini && 'mini', o.estatica && 'estatica', o.entra && 'entra',
   ].filter(Boolean).join(' ');
   const titulo = o.dados ? descricaoCarta(c, o.dados) + (tag ? ` · ${tag}` : '') : `${c.rank}${SUIT_SYMBOL[c.suit]}`;

@@ -37,6 +37,9 @@
     { "id": "simpatia_sao_bento", "nome": "Simpatia de São Bento", "preco": 3, "jogada": "queda_limpa", "descricao": "Sobe 1 nível de Queda Limpa" },
     { "id": "simpatia_lua_cheia", "nome": "Simpatia da Lua Cheia", "preco": 3, "jogada": "virada", "descricao": "Sobe 1 nível de Virada" },
     { "id": "simpatia_sete_ervas", "nome": "Simpatia das Sete Ervas", "preco": 3, "jogada": "mao_de_onze", "descricao": "Sobe 1 nível de Mão de Onze" },
-    { "id": "simpatia_fita_bonfim", "nome": "Simpatia da Fita do Bonfim", "preco": 3, "jogada": "cangada", "descricao": "Sobe 1 nível de Cangada" }
+    { "id": "simpatia_fita_bonfim", "nome": "Simpatia da Fita do Bonfim", "preco": 3, "jogada": "cangada", "descricao": "Sobe 1 nível de Cangada" },
+    { "id": "simpatia_ferradura", "nome": "Simpatia da Ferradura", "preco": 3, "jogada": "na_raca", "descricao": "Sobe 1 nível de Na Raça" },
+    { "id": "simpatia_agua_benta", "nome": "Simpatia da Água Benta", "preco": 3, "jogada": "no_empate", "descricao": "Sobe 1 nível de No Empate" },
+    { "id": "simpatia_pe_de_coelho", "nome": "Simpatia do Pé de Coelho", "preco": 3, "jogada": "fujao", "descricao": "Sobe 1 nível de Fujão" }
   ]
 }

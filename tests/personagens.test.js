@@ -193,5 +193,9 @@ test('perfil: fim de run atualiza recordes', () => {
 test('Bazar: todo item tem categoria válida e cada categoria tem um item grátis', () => {
   const cats = new Set(dados.bazar.categorias.map((x) => x.id));
   for (const i of dados.bazar.itens) assert.ok(cats.has(i.categoria), i.id);
-  for (const cat of cats) assert.equal(dados.bazar.itens.filter((i) => i.categoria === cat && i.preco === 0).length, 1, cat);
+  for (const cat of cats) {
+    const gratis = dados.bazar.itens.filter((i) => i.categoria === cat && i.preco === 0).length;
+    if (cat === 'personagem') assert.ok(gratis >= 1, cat); // começa com 3 personagens liberados
+    else assert.equal(gratis, 1, cat);
+  }
 });

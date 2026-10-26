@@ -10,7 +10,8 @@
     "tamanhoMao": 3,
     "cartasAdversario": 3,
     "ultimaMaoDeOnze": true,
-    "valorMaoDeOnze": 3
+    "valorMaoDeOnze": 3,
+    "tentosParaPerder": 12
   },
   "bairros": 8,
   "metas": [

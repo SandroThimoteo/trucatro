@@ -4,7 +4,7 @@
 import { SeededRng } from './rng.js';
 import { baralhoPadrao, criarCarta, manilhaRank, forca, isManilha, isZap, RANKS, SUITS } from './cards.js';
 import { criarMao, jogarCarta, pedirTruco, responderTruco, podePedirTruco, quemResponde } from './truco.js';
-import { decidirAcao, decidirAcaoDupla, sinalDaMao } from './ai.js';
+import { decidirAcao, decidirAcaoDupla, sinalDaMao, forcaMao } from './ai.js';
 import { pontuarVaza, pontuarMao, identificarJogada, valoresJogada } from './scoring.js';
 import { regraAtiva, registrarComparsas } from './comparsas.js';
 import { GameEventBus } from './events.js';
@@ -46,7 +46,7 @@ export class Jogo {
     this.reconectar();
   }
 
-  static novaRun(dados, { seed, baralhoId = 'boteco', desafio = null }, bus) {
+  static novaRun(dados, { seed, baralhoId = 'boteco', desafio = null, jogador = 'chico_baralho' }, bus) {
     const R = dados.regras;
     const baralho = dados.baralhosPorId[baralhoId];
     const mod = baralho.mod;
@@ -99,6 +99,7 @@ export class Jogo {
       vitoria: false,
       infinito: false,
       desafio,
+      jogador,
       rng: null,
     };
     run.rng = rng.toJSON();
@@ -152,6 +153,15 @@ export class Jogo {
   // Manha da Mesa: regras do personagem que mudam o jogo
   get regrasMesa() {
     return combinarRegras(this.pessoa?.regras ?? {}, this.run.mesa?.mod);
+  }
+
+  // Personagem que você joga e o poder dele
+  get jogador() {
+    return this.dados.jogadoresPorId[this.run.jogador ?? 'chico_baralho'] ?? this.dados.jogadores[0];
+  }
+
+  get tentosParaPerder() {
+    return this.dados.regras.mesa.tentosParaPerder ?? 12;
   }
 
   // A Mesa é em dupla (evento Mesa Dupla)
@@ -375,7 +385,10 @@ export class Jogo {
       rodada: null,
       historico: [],
       mod: r.modMesa ?? null,
+      tentosAdv: 0,
+      poderUsos: 0,
     };
+    r.mesa.tentosAdv = this.regrasMesa.tentosIniciais ?? 0;
     r.modMesa = null;
     r.resultadoEvento = null;
     r.avisos = [];
@@ -404,7 +417,7 @@ export class Jogo {
     const m = this.run.mesa;
     const rd = m.rodada;
     const vis = (c) => `${c.rank}${c.suit}`;
-    const ocupadas = new Set([...(rd?.viras ?? []), ...(rd?.maoAdv ?? [])].map(vis));
+    const ocupadas = new Set([...(rd?.viras ?? []), ...(rd?.maoAdv ?? []), ...(rd?.maoParceiro ?? []), ...(rd?.maoAdv2 ?? [])].map(vis));
     for (const id of m.mao) ocupadas.add(vis(this.carta(id)));
     while (m.mao.length < n) {
       if (!m.compra.length) {
@@ -454,7 +467,7 @@ export class Jogo {
       sinaisVistos: [],
       restoAdv: advDeck,
       iniciante: m.maoIdx % 2,
-      onze: R.mesa.ultimaMaoDeOnze && !this.regrasMesa.semMaoDeOnze && m.maosRestantes === 1,
+      onze: !this.regrasMesa.semMaoDeOnze && ((R.mesa.ultimaMaoDeOnze && m.maosRestantes === 1) || m.tentosAdv === this.tentosParaPerder - 1),
       reveladas: [],
       numVazas: 3,
       mao: null,
@@ -467,6 +480,8 @@ export class Jogo {
       ganhos: [],
       quebradas: [],
       resultado: null,
+      rezaForte: false,
+      cara: null,
     };
     this.emit('OnMaoDistribuida', { mao: [...m.mao] });
     if (m.rodada.vira) this.revelarVira();
@@ -492,6 +507,7 @@ export class Jogo {
     }
     delete rd.restoAdv;
     rd.reveladas = rd.maoAdv.slice(0, this.regrasMesa.revelaCartas ?? 0).map((c) => c.id);
+    this.atualizarCara();
     if (rd.maoParceiro) {
       const ctx = { vira: rd.vira };
       rd.sinais = { 0: null, 1: sinalDaMao(rd.maoAdv, ctx), 2: sinalDaMao(rd.maoParceiro, ctx), 3: sinalDaMao(rd.maoAdv2, ctx) };
@@ -519,6 +535,101 @@ export class Jogo {
     m.descarte.push(...ids);
     m.trocasRestantes--;
     this.comprarAte(m.tamanhoMao);
+  }
+
+  // ---------- cara do adversário ----------
+
+  // Um rosto mostra como o adversário se sente com a mão. Quem blefa mais, mente mais na cara.
+  atualizarCara() {
+    const rd = this.rodada;
+    if (!rd?.vira) return;
+    const cartas = rd.mao ? rd.mao.maos[1] : rd.maoAdv;
+    if (!cartas?.length) return;
+    const f = forcaMao(cartas, { vira: rd.vira });
+    const perfil = this.run.mesa.perfil ?? {};
+    const chanceMentir = Math.min(0.6, (perfil.blefe ?? 0.1) * 1.6 + (this.chefao ? 0.15 : 0));
+    const nivel = f >= 0.6 ? 2 : f >= 0.38 ? 1 : 0;
+    const mente = this.rng.stream('cara').chance(chanceMentir);
+    const mostrado = mente ? (nivel === 2 ? 0 : nivel === 0 ? 2 : this.rng.stream('cara').pick([0, 2])) : nivel;
+    rd.cara = { nivel: mostrado, emoji: ['😟', '😐', '😎'][mostrado], mente };
+  }
+
+  // ---------- poder do personagem ----------
+
+  // null se pode usar agora; senão o motivo
+  motivoSemPoder(alvos = []) {
+    const rd = this.rodada;
+    const m = this.run.mesa;
+    const poder = this.jogador.poder;
+    if (this.run.fase !== 'mesa' || !rd || rd.fase === 'fim' || rd.fase === 'vira') return 'Só durante uma mão';
+    const gratis = m.poderUsos < poder.gratis;
+    if (!gratis && !poder.custo) return 'Já usou todas as vezes nesta Mesa';
+    if (!gratis && poder.custo?.reis > this.run.reis) return `Faltam ${poder.custo.reis - this.run.reis} réis`;
+    const st = rd.mao;
+    if (poder.id === 'embaralhada') {
+      if (rd.fase !== 'jogo' || st.vez !== 0 || st.pedido) return 'Use na sua vez de jogar';
+      if (alvos.length !== 1) return 'Selecione 1 carta da mão';
+      if (!m.compra.length && !m.descarte.length) return 'O monte acabou';
+    }
+    if (poder.id === 'reza_forte' && rd.rezaForte) return 'A reza já está valendo';
+    if (poder.id === 'olho_vivo') {
+      const escondidas = (st ? st.maos[1] : rd.maoAdv).filter((c) => !rd.reveladas.includes(c.id));
+      if (rd.revelada || !escondidas.length) return 'Não tem carta escondida';
+    }
+    if (poder.id === 'vira_virada' && (rd.fase !== 'troca' || st)) return 'Só antes da primeira carta';
+    return null;
+  }
+
+  usarPoder(alvos = []) {
+    const motivo = this.motivoSemPoder(alvos);
+    if (motivo) throw new Error(motivo);
+    const r = this.run;
+    const m = r.mesa;
+    const rd = this.rodada;
+    const st = rd.mao;
+    const poder = this.jogador.poder;
+    const gratis = m.poderUsos < poder.gratis;
+    const s = this.rng.stream('poder');
+    let texto = poder.nome;
+
+    if (poder.id === 'embaralhada') {
+      const id = alvos[0];
+      const i = st.maos[0].findIndex((c) => c.id === id);
+      if (i < 0) throw new Error('Selecione 1 carta da mão');
+      m.mao = m.mao.filter((x) => x !== id);
+      m.descarte.push(id);
+      this.comprarAte(m.mao.length + 1);
+      const nova = m.mao[m.mao.length - 1];
+      st.maos[0][i] = clone(this.carta(nova));
+      texto = `Embaralhada: saiu ${this.carta(nova).rank}`;
+    } else if (poder.id === 'reza_forte') {
+      rd.rezaForte = true;
+    } else if (poder.id === 'olho_vivo') {
+      const escondidas = (st ? st.maos[1] : rd.maoAdv).filter((c) => !rd.reveladas.includes(c.id));
+      rd.reveladas.push(s.pick(escondidas).id);
+    } else if (poder.id === 'pendura') {
+      r.reis += 3;
+      m.tentosAdv += 1;
+    } else if (poder.id === 'vira_virada') {
+      const vis = (c) => `${c.rank}${c.suit}`;
+      const usadas = new Set([...m.mao.map((id) => vis(this.carta(id))), ...rd.maoAdv, ...(rd.maoParceiro ?? []), ...(rd.maoAdv2 ?? []), ...rd.viras].map((c) => (typeof c === 'string' ? c : vis(c))));
+      const livres = baralhoPadrao('o').filter((c) => !usadas.has(vis(c)));
+      rd.vira = s.pick(livres);
+      rd.viras = [rd.vira];
+      if (rd.maoParceiro) {
+        const ctx = { vira: rd.vira };
+        rd.sinais = { ...rd.sinais, 1: sinalDaMao(rd.maoAdv, ctx), 2: sinalDaMao(rd.maoParceiro, ctx), 3: sinalDaMao(rd.maoAdv2, ctx) };
+      }
+      this.atualizarCara();
+      texto = `Vira Virada: nova vira ${rd.vira.rank}`;
+    }
+
+    if (!gratis && poder.custo?.reis) r.reis -= poder.custo.reis;
+    if (!gratis && poder.custo?.tentos) m.tentosAdv += poder.custo.tentos;
+    m.poderUsos++;
+    this.emit('OnPoderUsado', { poder: poder.id, texto });
+    if (m.tentosAdv >= this.tentosParaPerder) this.perderRun('tentos');
+    return texto;
   }
 
   // Mesa Dupla: o sinal que você faz para o parceiro antes da primeira rodada
@@ -605,6 +716,7 @@ export class Jogo {
 
   aoResolverVaza(vaza) {
     const rd = this.rodada;
+    this.atualizarCara();
     const autor = vaza.autor ?? 0;
     const minha = vaza.cartas[autor];
     // na dupla, a carta a bater é a melhor do outro time
@@ -622,6 +734,7 @@ export class Jogo {
     const sc = pontuarVaza({
       dados: this.dados, carta: minha, jogada, ctxForca: ctxF, niveis: this.run.niveis,
       comparsas: this.run.comparsas, pessoa: this.pessoa, bonusMult: rd.bonusMultProxima,
+      xMultFinal: rd.rezaForte ? { valor: 2, origem: 'Reza Forte' } : null,
       info: {
         vazaIndice: vaza.indice,
         vazasVencidasAntes: rd.vazasPontuadas.length,
@@ -630,6 +743,7 @@ export class Jogo {
       },
     });
     rd.bonusMultProxima = 0;
+    rd.rezaForte = false;
     const registro = { indice: vaza.indice, carta: minha, autor, jogada, fichas: sc.fichas, mult: sc.mult, total: sc.totalFinal, passos: sc.passos };
     rd.vazasPontuadas.push(registro);
     if (sc.reis) this.ganharReis(sc.reis, 'Carta de Ouro');
@@ -680,10 +794,13 @@ export class Jogo {
 
     if (venceu) {
       if (st.correu === 1 && this.dados.regras.truco.fugaPontuaMelhorCarta && st.maos[0].length) this.pontuarFuga();
+      if (st.correu === 1) bonus.push('fujao');
       if (st.correu === null) {
         const vitorias = resultados.filter((x) => x === 0).length;
         if (vitorias === st.numVazas) bonus.push('queda_limpa');
         if (st.numVazas === 3 && resultados.join() === '1,0,0') bonus.push('virada');
+        if (st.numVazas === 3 && resultados.join() === '0,1,0') bonus.push('na_raca');
+        if (resultados.includes('empate')) bonus.push('no_empate');
         if (rd.onze) bonus.push('mao_de_onze');
       }
       maoCtx = pontuarMao({
@@ -717,11 +834,14 @@ export class Jogo {
     if (rd.quebradas.length) r.deck = r.deck.filter((c) => !rd.quebradas.includes(c.id));
 
     m.pontos += pontos;
+    // Segundo relógio: cada mão que o adversário leva vira tentos para ele
+    const tentos = st.vencedor === 1 ? st.pontos : 0;
+    m.tentosAdv += tentos;
     m.maosRestantes = Math.max(0, m.maosRestantes - 1 - penalidade);
     r.stats.maosJogadas++;
     r.stats.maiorMao = Math.max(r.stats.maiorMao, pontos);
     rd.resultado = {
-      venceu, vencedor: st.vencedor, pontos, valor: st.valor, correu: st.correu, penalidade, comparsaPerdida,
+      venceu, vencedor: st.vencedor, pontos, valor: st.valor, correu: st.correu, penalidade, comparsaPerdida, tentos,
       bonus, passos: maoCtx?.passos ?? [],
     };
     rd.fase = 'fim';
@@ -729,7 +849,8 @@ export class Jogo {
     this.emit('MaoPontuada', { ...rd.resultado });
 
     if (m.pontos >= m.meta) this.vencerMesa();
-    else if (m.maosRestantes <= 0) this.perderRun();
+    else if (m.tentosAdv >= this.tentosParaPerder) this.perderRun('tentos');
+    else if (m.maosRestantes <= 0) this.perderRun('maos');
   }
 
   proximaMao() {
@@ -790,10 +911,10 @@ export class Jogo {
     return (ch.drop ?? 0) + (bairro - 1) * B.porBairro + (venceuRun ? B.vitoriaRun : 0);
   }
 
-  perderRun() {
+  perderRun(motivo = 'maos') {
     const r = this.run;
     r.stats.pontosTotais = (r.stats.pontosTotais ?? 0) + r.mesa.pontos;
-    r.resultadoMesa = { venceu: false, pontos: r.mesa.pontos, meta: r.mesa.meta, tipo: r.mesa.tipo };
+    r.resultadoMesa = { venceu: false, pontos: r.mesa.pontos, meta: r.mesa.meta, tipo: r.mesa.tipo, motivo, tentos: r.mesa.tentosAdv };
     this.emit('OnMesaFinalizada', { venceu: false, ...r.resultadoMesa });
     r.fase = 'derrota';
   }

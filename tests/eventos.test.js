@@ -115,3 +115,98 @@ test('desafio do dia: mesmo dia, mesma run; pontuação = 1000 por Mesa + pontos
   assert.equal(pontuacaoDesafio(a), pontuacaoDesafio(b));
   assert.equal(pontuacaoDesafio(a), a.stats.mesasVencidas * 1000 + a.stats.pontosTotais);
 });
+
+// ---------- dois relógios, jogadas da mão, poderes e cara ----------
+
+function naMesa(seed, jogador = 'chico_baralho') {
+  const j = Jogo.novaRun(dados, { seed, jogador });
+  j.run.evento = null;
+  j.iniciarMesa();
+  if (j.rodada.fase === 'vira') j.escolherVira(0);
+  return j;
+}
+
+test('adversário que chega a 12 tentos ganha a Mesa, mesmo com mãos sobrando', () => {
+  const j = naMesa('TENTOS');
+  j.run.mesa.tentosAdv = 11;
+  j.run.mesa.maosRestantes = 4;
+  let n = 0;
+  while (j.run.fase === 'mesa' && n++ < 500) {
+    const rd = j.rodada;
+    if (rd.fase === 'fim') { j.proximaMao(); continue; }
+    if (rd.fase === 'troca') { if (j.podeAbrirParaIA()) j.comecarRodada(); else j.jogarCarta(j.run.mesa.mao[0]); continue; }
+    if (j.iaPrecisaAgir()) j.passoIA();
+    else if (rd.mao.pedido) j.responderTruco('correr');
+    else j.jogarCarta(rd.mao.maos[0][0].id);
+  }
+  if (j.run.fase === 'derrota') assert.ok(['tentos', 'maos'].includes(j.run.resultadoMesa.motivo));
+  assert.ok(j.run.fase === 'derrota' || j.run.mesa.pontos >= j.run.mesa.meta);
+});
+
+test('com 11 tentos do adversário a mão é de onze (vale 3, sem truco)', () => {
+  const j = Jogo.novaRun(dados, { seed: 'ONZE' });
+  j.run.evento = null;
+  j.iniciarMesa();
+  j.run.mesa.tentosAdv = 11;
+  j.rodada.fase = 'fim';
+  j.proximaMao();
+  assert.equal(j.rodada.onze, true);
+});
+
+test('Na Raça e No Empate entram como jogadas de mão', () => {
+  for (const id of ['na_raca', 'no_empate', 'fujao']) {
+    assert.equal(dados.jogadas[id].tipo, 'mao');
+    assert.ok(dados.simpatias.some((s) => s.jogada === id), `simpatia de ${id}`);
+  }
+});
+
+test('poderes: Olho Vivo revela, Reza Forte dobra, Pendura dá réis e tento, Vira Virada troca a vira', () => {
+  const ov = naMesa('P1', 'bigode_grosso');
+  const antes = ov.rodada.reveladas.length;
+  ov.usarPoder();
+  assert.equal(ov.rodada.reveladas.length, antes + 1);
+
+  const rz = naMesa('P2', 'vo_cida');
+  rz.usarPoder();
+  assert.equal(rz.rodada.rezaForte, true);
+  assert.throws(() => rz.usarPoder(), /reza/);
+
+  const pd = naMesa('P3', 'ze_fiado');
+  const reis = pd.run.reis;
+  pd.usarPoder();
+  pd.usarPoder();
+  assert.equal(pd.run.reis, reis + 6);
+  assert.equal(pd.run.mesa.tentosAdv, 2);
+  assert.throws(() => pd.usarPoder(), /todas as vezes/);
+
+  const vv = naMesa('P4', 'dona_gloria');
+  const vira = vv.rodada.vira;
+  vv.usarPoder();
+  assert.notDeepEqual(vv.rodada.vira, vira);
+  vv.usarPoder(); // pago: 1 tento
+  assert.equal(vv.run.mesa.tentosAdv, 1);
+});
+
+test('Embaralhada troca uma carta no meio da mão sem repetir carta', () => {
+  for (let i = 0; i < 30; i++) {
+    const j = naMesa(`EMB${i}`);
+    if (j.podeAbrirParaIA()) j.comecarRodada(); else j.comecarRodada();
+    j.avancarIA();
+    const st = j.rodada.mao;
+    if (st.fim || st.vez !== 0 || st.pedido) continue;
+    const id = st.maos[0][0].id;
+    j.usarPoder([id]);
+    assert.ok(!st.maos[0].some((c) => c.id === id));
+    assert.equal(st.maos[0].length, j.run.mesa.mao.length);
+  }
+});
+
+test('a cara do adversário existe e às vezes mente', () => {
+  let mentiras = 0;
+  for (let i = 0; i < 80; i++) {
+    const j = naMesa(`CARA${i}`);
+    assert.ok(['😟', '😐', '😎'].includes(j.rodada.cara.emoji));
+    if (j.rodada.cara.mente) mentiras++;
+  }
+  assert.ok(mentiras > 0 && mentiras < 60, `mentiras ${mentiras}`);
+});

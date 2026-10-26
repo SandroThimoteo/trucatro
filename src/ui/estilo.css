@@ -1013,3 +1013,68 @@ body[style*="--cenario"]::before { opacity: 1; }
 .ranking .info { grid-column: 2; font-size: 0.8rem; color: var(--giz-fraco); }
 .ranking .num { grid-row: 1 / span 2; grid-column: 3; color: var(--lampada); font-size: 1.2rem; }
 .resultado-desafio { width: min(100%, 480px); text-align: center; display: grid; gap: 8px; justify-items: center; }
+
+/* ---------- manilhas por cor de força: Pica-fumo azul < Espadilha verde < Copas laranja < Zap vermelho ---------- */
+.carta.man-ouros { --man-cor: #3f9be0; }
+.carta.man-espadas { --man-cor: #2fae5a; }
+.carta.man-copas { --man-cor: #f08a1c; }
+.carta.man-paus { --man-cor: #e0322a; }
+.carta.manilha:not(.sel) { box-shadow: 0 0 0 3px var(--man-cor, var(--lampada)), 0 0 14px color-mix(in srgb, var(--man-cor, var(--lampada)) 60%, transparent), 0 8px 18px var(--sombra); }
+.carta.manilha .tag { background: var(--man-cor, var(--tinta)); color: #fff; }
+.carta.mini.manilha:not(.sel) { box-shadow: 0 0 0 2px var(--man-cor, var(--lampada)); }
+/* Carta que perdeu a rodada: apagada */
+.carta.perdeu { filter: grayscale(1) brightness(0.7); opacity: 0.75; }
+
+/* ---------- cara do adversário ---------- */
+.adversario .quem { position: relative; }
+.cara {
+  position: absolute; left: 34px; top: -6px; font-size: 1.35rem; line-height: 1;
+  background: var(--papel); border-radius: 50%; padding: 2px; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+  animation: pop 0.35s ease-out; cursor: help;
+}
+
+/* ---------- tentos do adversário (2º relógio) e poder ---------- */
+.tentos-barra i { background: linear-gradient(90deg, #f08a1c, #e0322a); }
+.tentos.perigo .num { color: #ff8c7a; }
+.tentos.perigo .tentos-barra { animation: pulsa-perigo 1s ease-in-out infinite; }
+@keyframes pulsa-perigo { 50% { box-shadow: 0 0 0 3px rgba(224, 50, 42, 0.45); } }
+.linha-giz.tentos.perigo { color: #ffd7d2; }
+.poder {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; align-items: center; margin: 8px 0;
+  padding: 8px 10px; border-radius: 10px; background: rgba(242, 193, 78, 0.1); box-shadow: inset 0 0 0 1px rgba(242, 193, 78, 0.35);
+}
+.poder .avatar { font-size: 1.8rem; }
+.poder small { color: var(--giz-fraco); }
+.poder .btn { grid-column: 1 / -1; }
+.poder .btn small { color: inherit; opacity: 0.8; font-weight: 400; }
+.poder .info { position: static; display: inline-grid; vertical-align: middle; }
+
+/* ---------- escolha do personagem ---------- */
+.jogador-ficha .poder-nome { font-family: var(--display); color: var(--lampada-escura, #7a5a12); margin: 6px 0 0; }
+.jogador-ficha.bloqueada { opacity: 0.6; }
+.jogador-ficha .cadeado { display: inline-block; margin-top: 6px; font-weight: 700; color: var(--ruim); }
+.subtitulo-tela { margin: 22px 0 12px; color: var(--lampada); font-size: clamp(1.2rem, 3.5vw, 1.6rem); }
+.personagem-preview { display: grid; gap: 6px; text-align: center; padding: 10px; }
+.personagem-preview p { margin: 0; font-size: 0.82rem; color: var(--giz); }
+
+/* ---------- efeitos leves (opção do jogador): sem tremida, clarões, faíscas nem sol ---------- */
+.efeitos-leves .palco.treme .palco-centro, .efeitos-leves .palco.explode .palco-carta .carta, .efeitos-leves .cena.final .cena-chefe,
+.efeitos-leves .roleta-palco.ruim .roleta-texto { animation: none !important; }
+.efeitos-leves .faisca, .efeitos-leves .onda, .efeitos-leves .palco-sol, .efeitos-leves .cena-luz { display: none; }
+.efeitos-leves .cena-fundo { animation: none; }
+
+@media (max-width: 860px) {
+  .mesa-layout > .lousa .poder { grid-column: 1 / -1; margin: 2px 0; padding: 4px 8px; grid-template-columns: auto minmax(0, 1fr) auto; }
+  .mesa-layout > .lousa .poder > div small, .mesa-layout > .lousa .poder > small { display: none; }
+  .mesa-layout > .lousa .poder .avatar { font-size: 1.2rem; }
+  .mesa-layout > .lousa .poder .btn { grid-column: auto; padding: 4px 10px; font-size: 0.8rem; }
+}
+@media (max-width: 860px) {
+  .mesa-layout > .lousa { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 14px; }
+  .mesa-layout > .lousa > .linha-giz { grid-column: span 1; }
+  .mesa-layout > .lousa .poder { grid-column: 1 / -1; grid-template-columns: auto minmax(0, 1fr); }
+  .mesa-layout > .lousa .poder > div { display: none; }
+  .mesa-layout > .lousa .poder .btn { width: 100%; }
+  .mesa-layout > .lousa .meta-linha .rotulo { font-size: 0.8rem; }
+}
+.meta-linha .num { white-space: nowrap; }

@@ -50,6 +50,9 @@ const app = {
   salvoErro: false,
   bazarCat: 'verso',
   ranking: null, // Desafio do dia: { dia, linhas, erro }
+  jogadorSel: null, // personagem escolhido para a próxima run
+  travaAte: 0, // ignora cliques logo depois de trocar de tela (evita clique perdido)
+  ultimaTela: '',
 };
 
 const dupla = () => app.partida instanceof PartidaDupla;
@@ -414,7 +417,9 @@ function falarClassico(acao) {
 function novaRunCom(seed, baralhoId, desafio = null) {
   const bus = new GameEventBus();
   bus.on('*', (ev) => app.fila.push(ev));
-  app.jogo = Jogo.novaRun(app.dados, { seed, baralhoId, desafio }, bus);
+  // Desafio do dia: todo mundo joga com o mesmo personagem
+  const jogador = desafio ? 'chico_baralho' : app.jogadorSel ?? equipado('personagem')?.jogador ?? 'chico_baralho';
+  app.jogo = Jogo.novaRun(app.dados, { seed, baralhoId, desafio, jogador }, bus);
   app.tela = 'jogo';
   app.resumo = false;
   app.conta = null;
@@ -470,6 +475,20 @@ const acoes = {
   },
   irLogin() { app.tela = 'login'; },
   escolherBaralho(id) { app.baralhoSel = id; },
+  escolherJogador(id) {
+    app.jogadorSel = id;
+    const item = app.dados.bazarPorId[`jogador_${id}`];
+    if (item) { equiparItem(app.dados, app.perfil, item.id); salvarPerfil(); }
+  },
+  irBazarPersonagem() { app.tela = 'bazar'; app.bazarCat = 'personagem'; },
+  poder() {
+    const j = app.jogo;
+    executar(() => {
+      const texto = j.usarPoder([...app.sel]);
+      audio.tocar('raio', 6);
+      toast(`⚡ ${texto}`);
+    });
+  },
   novaSeed() { app.seed = randomSeed(); },
   comecarRun() {
     const input = document.getElementById('seed-input');
@@ -745,7 +764,7 @@ raiz.addEventListener('click', (e) => {
     return;
   }
   const el = e.target.closest('[data-acao]');
-  if (!el || el.disabled || app.ocupado) return;
+  if (!el || el.disabled || app.ocupado || performance.now() < app.travaAte) return;
   const fn = acoes[el.dataset.acao];
   if (!fn) return;
   if (el.tagName === 'BUTTON' && !el.classList.contains('carta')) audio.tocar('clique');
@@ -764,6 +783,7 @@ raiz.addEventListener('input', (e) => {
   if (!chave || !app.perfil) return;
   app.perfil.opcoes[chave] = e.target.type === 'checkbox' ? e.target.checked : Number(e.target.value);
   audio.configurar(app.perfil.opcoes);
+  document.body.classList.toggle('efeitos-leves', !!app.perfil.opcoes.efeitosLeves);
   salvarPerfil();
 });
 
@@ -800,6 +820,7 @@ document.addEventListener('keydown', destravar);
 
 function render() {
   document.body.classList.toggle('ocupado', app.ocupado);
+  document.body.classList.toggle('efeitos-leves', !!app.perfil?.opcoes?.efeitosLeves);
   let html = '';
   if (!app.dados || app.tela === 'carregando') html = '<section class="menu"><h1 class="logo">TRUCATRO</h1><p class="rotulo">Embaralhando...</p></section>';
   else if (app.tela === 'login') html = telaLogin();
@@ -818,6 +839,11 @@ function render() {
     if (el) valores[id] = el.value;
   }
   raiz.innerHTML = html + botaoSom() + modalHTML();
+  const assinatura = `${app.tela}|${app.jogo?.run.fase ?? ''}|${raiz.querySelector('.sobreposto') ? 1 : 0}|${app.modal ?? ''}`;
+  if (assinatura !== app.ultimaTela) {
+    app.ultimaTela = assinatura;
+    app.travaAte = performance.now() + 350;
+  }
   for (const [id, v] of Object.entries(valores)) {
     const el = document.getElementById(id);
     if (el) el.value = v;
@@ -902,7 +928,20 @@ function telaSelecao() {
     <button class="ficha ${b.id === app.baralhoSel ? 'escolhida' : ''}" data-acao="escolherBaralho" data-arg="${b.id}" style="text-align:left;border:0;cursor:pointer">
       <h3>${esc(b.nome)}</h3><p>${esc(b.descricao)}</p>
     </button>`).join('');
-  return `<div class="topo"><h2>Escolha o baralho</h2><button class="btn fantasma acao" data-acao="irMenu">Voltar</button></div>
+  const sel = app.jogadorSel ?? equipado('personagem')?.jogador ?? 'chico_baralho';
+  const quem = app.dados.jogadores.map((jg) => {
+    const item = app.dados.bazarPorId[`jogador_${jg.id}`];
+    const tem = !item || app.perfil.compras.includes(item.id);
+    return `<button class="ficha jogador-ficha ${jg.id === sel ? 'escolhida' : ''} ${tem ? '' : 'bloqueada'}" data-acao="${tem ? 'escolherJogador' : 'irBazarPersonagem'}" data-arg="${jg.id}" style="text-align:left;border:0;cursor:pointer">
+      <div class="pessoa-cab"><span class="avatar grande" aria-hidden="true">${esc(jg.avatar)}</span><div><h3>${esc(jg.nome)}</h3><small>${esc(jg.titulo)}</small></div></div>
+      <p class="poder-nome">⚡ ${esc(jg.poder.nome)}</p><p>${esc(jg.poder.descricao)}</p>
+      <p class="rotulo">${jg.poder.gratis}× grátis por Mesa${jg.poder.custo ? ` · depois ${jg.poder.custo.reis ? `${jg.poder.custo.reis} réis` : `${jg.poder.custo.tentos} tento ao adversário`}` : ''}</p>
+      ${tem ? '' : `<span class="cadeado">🔒 ${item.preco} Tampinhas no Bazar</span>`}
+    </button>`;
+  }).join('');
+  return `<div class="topo"><h2>Quem vai jogar?</h2><button class="btn fantasma acao" data-acao="irMenu">Voltar</button></div>
+    <div class="grade">${quem}</div>
+    <h2 class="subtitulo-tela">Escolha o baralho</h2>
     <div class="grade">${fichas}</div>
     <div class="placa" style="margin-top:18px;display:grid;gap:12px">
       <div class="campo"><label class="rotulo" for="seed-input" style="color:var(--papel)">Seed</label>
@@ -961,6 +1000,10 @@ function previewItem(item) {
   if (item.categoria === 'frente') return `<div class="${item.classe} preview">${cartaHTML({ id: 'p1', rank: 'A', suit: 'espadas' }, { estatica: true })}${cartaHTML({ id: 'p2', rank: '7', suit: 'copas' }, { estatica: true })}</div>`;
   if (item.categoria === 'toalha') return `<div class="${item.classe} preview"><div class="toalha amostra"></div></div>`;
   if (item.categoria === 'raio') return `<div class="${item.classe} preview raio-preview"><svg viewBox="0 0 200 110" aria-hidden="true"><polyline class="raio brilho" points="10,20 60,45 45,58 110,70 95,82 190,95"/><polyline class="raio nucleo" points="10,20 60,45 45,58 110,70 95,82 190,95"/></svg></div>`;
+  if (item.categoria === 'personagem') {
+    const jg = app.dados.jogadoresPorId[item.jogador];
+    return `<div class="preview personagem-preview"><span class="avatar-grande" aria-hidden="true">${esc(jg.avatar)}</span><p><b>⚡ ${esc(jg.poder.nome)}</b><br>${esc(jg.poder.descricao)}</p></div>`;
+  }
   if (item.categoria === 'forma') return `<div class="preview raio-preview" data-forma="${esc(item.classe)}"><svg viewBox="0 0 200 110" aria-hidden="true">${formaPreview(item.classe)}</svg></div>`;
   if (item.categoria === 'efeito') return `<div class="${item.classe} preview efeito-preview"><div class="palco-carta">${cartaHTML({ id: 'p3', rank: '3', suit: 'paus' }, { estatica: true })}</div></div>`;
   if (item.categoria === 'cenario') return item.imagem ? `<div class="preview cenario-preview" style="background-image:url('${urlCenario(item.imagem)}')"></div>` : '<div class="preview"><p class="citacao">Só o xadrez do boteco</p></div>';
@@ -1237,6 +1280,8 @@ function lousaMesa(j) {
       <div class="meta-linha"><span class="rotulo">Pontos / Meta</span><span class="num">${fmt(m.pontos)} / ${fmt(m.meta)}</span></div>
       <div class="barra" role="progressbar" aria-valuenow="${Math.round(perc)}" aria-valuemin="0" aria-valuemax="100"><i style="width:${perc}%"></i></div>
     </div>
+    ${tentosHTML(j)}
+    ${poderHTML(j)}
     <div class="stats">
       <div class="linha-giz"><span class="rotulo">Mãos</span><span class="num">${m.maosRestantes}</span></div>
       <div class="linha-giz"><span class="rotulo">Trocas</span><span class="num">${m.trocasRestantes}</span></div>
@@ -1248,6 +1293,33 @@ function lousaMesa(j) {
       <button class="btn fantasma peq acao" data-acao="modal" data-arg="jogadas">Jogadas</button>
     </div>
   </aside>`;
+}
+
+// Segundo relógio: tentos do adversário até 12
+function tentosHTML(j) {
+  const m = j.run.mesa;
+  const max = j.tentosParaPerder;
+  const perc = Math.min(100, (m.tentosAdv / max) * 100);
+  const perigo = m.tentosAdv >= max - 3;
+  return `<div class="linha-giz tentos ${perigo ? 'perigo' : ''}" style="display:block" title="Se o adversário chegar a ${max} tentos, você perde a Mesa">
+    <div class="meta-linha"><span class="rotulo">Tentos dele</span><span class="num">${m.tentosAdv} / ${max}</span></div>
+    <div class="barra tentos-barra" role="progressbar" aria-valuenow="${m.tentosAdv}" aria-valuemin="0" aria-valuemax="${max}"><i style="width:${perc}%"></i></div>
+  </div>`;
+}
+
+function poderHTML(j) {
+  const jg = j.jogador;
+  const p = jg.poder;
+  const m = j.run.mesa;
+  const gratis = Math.max(0, p.gratis - m.poderUsos);
+  const custo = gratis ? `${gratis} grátis` : p.custo ? (p.custo.reis ? `custa ${p.custo.reis} réis` : `custa ${p.custo.tentos} tento`) : 'acabou';
+  const motivo = j.motivoSemPoder([...app.sel]);
+  return `<div class="poder">
+    <span class="avatar" aria-hidden="true">${esc(jg.avatar)}</span>
+    <div><b>${esc(jg.nome)}</b> ${infoBtn('poder', jg.id, p.nome)}<br><small>${esc(p.descricao)}</small></div>
+    <button class="btn amarelo peq acao" data-acao="poder" ${motivo ? `disabled title="${esc(motivo)}"` : ''}>⚡ ${esc(p.nome)} <small>(${custo})</small></button>
+    ${motivo && p.id === 'embaralhada' && app.sel.length !== 1 ? '<small class="rotulo">Na sua vez, selecione 1 carta e toque no poder.</small>' : ''}
+  </div>`;
 }
 
 function viraVisivel(j) {
@@ -1274,7 +1346,7 @@ function vazasHTML(rd, ctx, nomeAdv, nomes = null) {
       const pts = rd.vazasPontuadas.find((x) => x.indice === i);
       const ordem = v.cartas.length > 2 ? [1, 3, 2, 0] : [1, 0];
       slots.push(`<div class="vaza ${v.cartas.length > 2 ? 'quatro' : ''}">
-        <div class="par">${ordem.map((k) => cartaHTML(v.cartas[k], { ctx, mini: true, estatica: true })).join('')}</div>
+        <div class="par">${ordem.map((k) => cartaHTML(v.cartas[k], { ctx, mini: true, estatica: true, perdeu: v.vencedor !== 'empate' && k % 2 !== v.vencedor })).join('')}</div>
         ${res}${pts ? `<span class="pts">${fmt(pts.total)}</span>` : ''}
       </div>`);
     } else if (st && !st.fim && i === st.vazas.length) {
@@ -1412,7 +1484,7 @@ function overlayMesa(j) {
     const rm = r.resultadoMesa;
     return `<div class="sobreposto" role="dialog" aria-modal="true"><div class="lousa resultado">
       <h2>${venceu ? 'Você é o novo Rei do Truco!' : 'Fim da linha, parceiro'}</h2>
-      <p>${venceu ? 'Ninguém em São Paulo segura esse baralho.' : `${esc(pessoa.nome)} venceu. Faltaram ${fmt(r.mesa.meta - r.mesa.pontos)} pontos para a meta.`}</p>
+      <p>${venceu ? 'Ninguém em São Paulo segura esse baralho.' : rm?.motivo === 'tentos' ? `${esc(pessoa.nome)} chegou a ${j.tentosParaPerder} tentos antes de você bater a meta.` : `${esc(pessoa.nome)} venceu. Faltaram ${fmt(r.mesa.meta - r.mesa.pontos)} pontos para a meta.`}</p>
       ${venceu && rm?.tampinhas ? `<div class="drop-grande"><i class="tampa" aria-hidden="true"></i>+${rm.tampinhas} Tampinhas</div>` : ''}
       <div class="botoes"><button class="btn amarelo acao" data-acao="verResumo">Ver resumo</button></div>
     </div></div>`;
@@ -1435,6 +1507,7 @@ function overlayMesa(j) {
     <h2>${esc(titulo)}</h2>
     <div class="grande">${res.venceu ? `+${fmt(res.pontos)}` : '0'}</div>
     ${linhas.join('')}
+    ${res.tentos ? `<div class="linha-giz tentos perigo"><span>Tentos para ${esc(rd.maoParceiro ? 'eles' : pessoa.nome)}</span><span class="num">+${res.tentos} (${r.mesa.tentosAdv} / ${j.tentosParaPerder})</span></div>` : ''}
     <div class="linha-giz"><span>Pontos na Mesa</span><span class="num">${fmt(r.mesa.pontos)} / ${fmt(r.mesa.meta)}</span></div>
     <div class="botoes"><button class="btn amarelo acao" data-acao="proximaMao" autofocus>Próxima mão</button></div>
   </div></div>`;
@@ -1481,7 +1554,7 @@ function telaMesa() {
       ${temItens ? `<div class="faixa compacta">${slotsComparsas(j, false, true)}${slotsConsumiveis(j, true)}</div>` : ''}
       <section class="toalha" aria-label="Mesa">
         <div class="adversario">
-          <div class="quem">${avatarHTML(pessoa, true)}<div><span class="rotulo" style="color:var(--papel)">${esc(pessoa.titulo)}</span><h3>${esc(pessoa.nome)}</h3></div></div>
+          <div class="quem">${avatarHTML(pessoa, true)}${rd.cara ? `<span class="cara" title="Como ${esc(pessoa.nome)} parece estar com a mão (às vezes é blefe)">${rd.cara.emoji}</span>` : ''}<div><span class="rotulo" style="color:var(--papel)">${esc(pessoa.titulo)}</span><h3>${esc(pessoa.nome)}</h3></div></div>
           ${rd.fala ? `<div class="fala">${esc(rd.fala)}</div>` : pensando ? '<div class="fala pensando" aria-label="pensando"><i></i><i></i><i></i></div>' : ''}
           <div class="cartas-adv">${adv}</div>
           <div class="vira-box"><span class="rotulo">Vira</span>${vira}</div>
@@ -1783,6 +1856,10 @@ function blocoDetalhe(rotulo, nome, curta, longa, extra = '') {
 }
 
 function detalheConteudo({ tipo, id }) {
+  if (tipo === 'poder') {
+    const jg = app.dados.jogadoresPorId[id];
+    return blocoDetalhe('Poder', `${jg.avatar} ${jg.nome}: ${jg.poder.nome}`, jg.poder.descricao, jg.poder.detalhe);
+  }
   const d = app.dados;
   if (tipo === 'comparsa') {
     const c = d.comparsasPorId[id];
@@ -1864,6 +1941,7 @@ function modalHTML() {
     const faixa = (chave, nome) => `<label class="faixa-som"><span>${nome}</span><input type="range" min="0" max="1" step="0.05" value="${o[chave]}" data-opcao="${chave}" aria-label="${nome}"></label>`;
     corpo = `${faixa('musica', 'Música (baião)')}${faixa('ambiente', 'Ambiente do bar')}${faixa('efeitos', 'Efeitos')}${faixa('vozes', 'Vozes')}
       <label class="faixa-som"><span>Tudo mudo</span><input type="checkbox" ${o.mudo ? 'checked' : ''} data-opcao="mudo"></label>
+      <label class="faixa-som"><span>Efeitos leves (sem tremida nem clarões)</span><input type="checkbox" ${o.efeitosLeves ? 'checked' : ''} data-opcao="efeitosLeves"></label>
       <p class="rotulo">${audio.temVoz() ? 'As vozes usam a fala do seu navegador; o sotaque depende das vozes instaladas no aparelho.' : 'Este navegador não tem voz sintetizada: as falas aparecem só em balões.'}</p>`;
   } else if (app.modal === 'ajuda') {
     titulo = 'Como jogar';
@@ -1874,6 +1952,11 @@ function modalHTML() {
       <p><b>Truco:</b> a mão vale 1 e o truco sobe para 3, 6, 9 e 12. Quem recebe pode aceitar, correr ou aumentar.</p>
       <p><b>Na run:</b> você enfrenta 3 pessoas por bairro, em 8 bairros. Cada uma tem uma meta de pontos, um número de mãos e uma <b>manha</b>: uma regra só daquela Mesa. Você recebe 3 cartas e, antes da 1ª rodada, pode trocar 1, 2 ou as 3 (cada troca gasta 1 das trocas da Mesa). Se perde a mão, não leva nada; se o seu truco foi aceito e você perdeu, perde uma mão extra. Se o adversário corre do seu truco, sua melhor carta pontua como uma rodada vencida.</p>
       <p>A última mão de cada Mesa é a <b>mão de onze</b>: vale 3, sem truco.</p>
+      <p><b>Dois relógios:</b> você vence a Mesa batendo a meta de pontos. Mas cada mão que o adversário ganha vale <b>tentos</b> para ele (1, ou o valor do truco). Se ele chegar a <b>12 tentos</b>, você perde, mesmo com mãos sobrando. Com 11 tentos dele, a mão é de onze. Truco aceito é ótimo para pontuar e perigoso para o relógio.</p>
+      <p><b>Jogadas da mão:</b> além de cada rodada, o jeito de ganhar a mão pontua: Queda Limpa (todas), Virada (perdeu a 1ª e virou), Na Raça (ganhou, perdeu, ganhou), No Empate (com uma rodada empatada) e Fujão (o adversário correu).</p>
+      <p><b>Personagem:</b> cada um tem um <b>poder</b> (botão ⚡ na lousa) com usos grátis por Mesa; depois custa réis ou dá tentos ao adversário.</p>
+      <p><b>Cara do adversário:</b> o rostinho ao lado dele mostra como ele parece estar com a mão. 😎 forte, 😐 mais ou menos, 😟 fraca. Quem blefa muito mente na cara.</p>
+      <p><b>Manilhas por cor:</b> a borda da manilha mostra a força. Azul é o Pica-fumo, verde a Espadilha, laranja a de Copas e vermelho o Zap. A carta que perdeu a rodada fica cinza.</p>
       <h3 class="secao-giz">Glossário</h3>
       <dl class="glossario">
         <dt>Fichas × Mult</dt><dd>A conta de cada rodada vencida. Fichas vêm da carta (Ás = 10, 3 = 15, manilha = 20, Zap = 30) e da Jogada; Mult vem da Jogada e dos bônus. Depois a mão é multiplicada pelo valor do truco.</dd>
