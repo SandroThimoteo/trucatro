@@ -145,3 +145,19 @@ _(Agente escreve aqui quando precisa de algo de outra área e ainda não foi fei
 - Decidi: aceitar o balanço do regras (Técnico +15 por uso até 3, Marcador +2 Mult, Torcedor ×2,5); Careca do Bingo passa a 🎤; o contrato de avatar/cor/som/falas vale para todo Comparsa novo daqui em diante.
 - Mudei: nada fora do mural; commit e publicação dos trabalhos de itens, falas, audio, estilo, regras e qa.
 - Pedidos: nenhum
+
+### 2026-10-26 · regras · modo Deus do admin
+- Decidi: `jogo.adminModoDeus(ligado)` grava `run.modoDeus` (ligar marca a run como testada, não vale para o ranking); getter `jogo.modoDeus`. Ligado: o adversário não ganha tentos (fim de mão, Pendura, poder que custa tento) e começa a Mesa com 0 (ignora `tentosIniciais` da manha); sem bater a meta, `maosRestantes` nunca cai abaixo de 1 (nem com a penalidade de blefe); `perderRun` não acontece (guarda nos caminhos e dentro do próprio `perderRun`). Rodadas e mãos ainda se perdem normalmente (sem pontos); o resultado da mão mostra `tentos: 0`. Desligar volta ao normal dali em diante (tentos e mãos já acumulados ficam como estão).
+- Mudei: `src/core/run.js`, `tests/modo-deus.test.js` (novo, a pedido do coordenador). `npm test`: 125 passaram, 0 falharam.
+- Pedidos: @estilo botão do modo Deus no painel 🛠️ Testes chamando `jogo.adminModoDeus(!jogo.modoDeus)` e lendo `jogo.modoDeus` para o estado; @qa conferir no navegador uma Mesa com o modo Deus ligado (correr de todo truco até vencer).
+
+### 2026-10-26 · estilo · botão e selo do modo Deus
+- Decidi: no topo do painel 🛠️ Testes, fieldset "Modo Deus" com botão largo ("😇 Ligar modo Deus" amarelo / "Desligar modo Deus" fantasma, `aria-pressed`) e uma frase explicando (não perde a Mesa nem a run; rodadas e mãos ainda se perdem). Ação `adminModoDeus` chama `jogo.adminModoDeus(!jogo.modoDeus)` dentro de `executar`, com toast. Ligado: selo "😇 Modo Deus" (pílula `--lampada`) logo abaixo do botão de testes na lousa (no celular, ao lado dele) e a barra "Tentos dele" apagada (cinza, `--giz-fraco`) com "🔒 travado", sem o pulso de perigo. Se o motor não tiver `adminModoDeus`, o botão aparece desativado e nada quebra.
+- Mudei: `src/ui/main.js` (`temModoDeus`, `modoDeusLigado`, `tentosHTML`, lousa, `painelTestes`, ação `adminModoDeus`), `src/ui/estilo.css` (bloco "Modo Deus (admin)" no painel de testes).
+- Testes: `node --check` ok; `npm test`: 125 passaram, 0 falharam. Navegador em 375, 1231 e 1901: liga/desliga, selo e "travado" aparecem e somem, sem rolagem lateral, nenhum erro no console.
+- Pedidos: nenhum
+
+### 2026-10-26 · coordenador · modo Deus publicado
+- Decidi: aceitar os tentos iniciais zerados no modo Deus (proposta do regras). Conferi no navegador no lugar do qa: Mesa jogada correndo de todo truco, 8 mãos perdidas, tentos em 0, mãos nunca chegaram a 0, Mesa vencida, sem erro.
+- Mudei: nada fora do mural; commit e publicação do trabalho de regras e estilo.
+- Pedidos: nenhum

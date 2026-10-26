@@ -1098,6 +1098,20 @@ body[style*="--cenario"]::before { opacity: 1; }
 .painel-teste select, .painel-teste input { font: inherit; background: #151c18; color: var(--giz); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 6px; padding: 6px 8px; }
 .painel-teste .carta-escolha { display: flex; gap: 4px; align-items: center; }
 .painel-teste small { color: var(--giz-fraco); }
+/* Modo Deus (admin) */
+.painel-teste .fs-deus { border-color: rgba(242, 193, 78, 0.45); }
+.painel-teste .fs-deus.ligado { background: rgba(242, 193, 78, 0.1); border-color: var(--lampada); }
+.btn-deus { width: 100%; font-size: 1.05em; }
+.selo-deus {
+  display: block; width: fit-content; margin: 6px auto 0; padding: 2px 10px; border-radius: 999px;
+  font-size: 0.85em; color: var(--tinta); background: var(--lampada); box-shadow: 0 0 0 1px var(--ouro), 0 0 10px rgba(242, 193, 78, 0.35);
+}
+/* Na lousa em grade (celular) o selo fica ao lado do botão de testes, sem esticar */
+@media (max-width: 860px) { .mesa-layout > .lousa .selo-deus { align-self: center; justify-self: center; margin: 8px 0 0; } }
+.tentos.travado { color: var(--giz-fraco); }
+.tentos.travado .num { color: var(--giz-fraco); }
+.tentos.travado .tentos-barra { opacity: 0.4; filter: grayscale(1); }
+.cadeado-deus { font-size: 0.8em; color: var(--lampada); margin-left: 4px; white-space: nowrap; }
 
 /* ---------- Comparsas com rosto, cor e fala (avatar/cor em data/comparsas.json) ---------- */
 .com-avatar { display: flex; align-items: center; gap: 6px; min-width: 0; }

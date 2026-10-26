@@ -516,6 +516,13 @@ const acoes = {
     const [tipo, id] = document.getElementById('adm-cons').value.split(':');
     executar(() => { app.jogo.adminConsumivel(tipo, id); toast('Item adicionado'); });
   },
+  adminModoDeus() {
+    executar(() => {
+      if (!temModoDeus(app.jogo)) throw new Error('O modo Deus ainda não existe nesta versão.');
+      app.jogo.adminModoDeus(!app.jogo.modoDeus);
+      toast(app.jogo.modoDeus ? '😇 Modo Deus ligado: você não perde a Mesa nem a run' : 'Modo Deus desligado');
+    }, { limparSel: false });
+  },
   adminValores() {
     const n = (id) => { const x = document.getElementById(id)?.value; return x === '' || x == null ? null : Number(x); };
     executar(() => {
@@ -1332,6 +1339,7 @@ function lousaMesa(j) {
     </div>
     ${contaHTML()}
     ${podeTestar() ? `<button class="btn fantasma peq acao btn-teste" data-acao="modal" data-arg="testes">🛠️ Testes (admin)${r.testada ? ' · usado' : ''}</button>` : ''}
+    ${modoDeusLigado(j) ? '<span class="selo-deus" title="Modo Deus ligado: o adversário não ganha tentos e as mãos não acabam">😇 Modo Deus</span>' : ''}
     <div class="botoes botoes-lousa" style="margin-top:12px">
       <button class="btn fantasma peq acao" data-acao="modal" data-arg="baralho">Baralho (${r.deck.length})</button>
       <button class="btn fantasma peq acao" data-acao="modal" data-arg="jogadas">Jogadas</button>
@@ -1339,14 +1347,20 @@ function lousaMesa(j) {
   </aside>`;
 }
 
+// Modo Deus (admin): protegido para não quebrar se o motor ainda não tiver
+function temModoDeus(j) { return !!j && typeof j.adminModoDeus === 'function'; }
+function modoDeusLigado(j) { return temModoDeus(j) && !!j.modoDeus; }
+
 // Segundo relógio: tentos do adversário até 12
 function tentosHTML(j) {
   const m = j.run.mesa;
   const max = j.tentosParaPerder;
   const perc = Math.min(100, (m.tentosAdv / max) * 100);
-  const perigo = m.tentosAdv >= max - 3;
-  return `<div class="linha-giz tentos ${perigo ? 'perigo' : ''}" style="display:block" title="Se o adversário chegar a ${max} tentos, você perde a Mesa">
-    <div class="meta-linha"><span class="rotulo">Tentos dele</span><span class="num">${m.tentosAdv} / ${max}</span></div>
+  const deus = modoDeusLigado(j);
+  const perigo = !deus && m.tentosAdv >= max - 3;
+  const dica = deus ? 'Modo Deus: os tentos dele estão travados' : `Se o adversário chegar a ${max} tentos, você perde a Mesa`;
+  return `<div class="linha-giz tentos ${perigo ? 'perigo' : ''} ${deus ? 'travado' : ''}" style="display:block" title="${dica}">
+    <div class="meta-linha"><span class="rotulo">Tentos dele${deus ? ' <span class="cadeado-deus">🔒 travado</span>' : ''}</span><span class="num">${m.tentosAdv} / ${max}</span></div>
     <div class="barra tentos-barra" role="progressbar" aria-valuenow="${m.tentosAdv}" aria-valuemin="0" aria-valuemax="${max}"><i style="width:${perc}%"></i></div>
   </div>`;
 }
@@ -1976,6 +1990,11 @@ function painelTestes(j) {
   const cons = [...app.dados.causos.map((c) => [`causo:${c.id}`, `Causo: ${c.nome}`]), ...app.dados.simpatias.map((s) => [`simpatia:${s.id}`, `Simpatia: ${s.nome}`])];
   return `<div class="painel-teste">
     <p><small>Só você vê isto. Uma run que usa os testes não vale para o ranking do Desafio do dia.</small></p>
+    <fieldset class="fs-deus ${modoDeusLigado(j) ? 'ligado' : ''}"><legend>Modo Deus</legend>
+      ${temModoDeus(j)
+        ? `<button class="btn ${modoDeusLigado(j) ? 'fantasma' : 'amarelo'} acao btn-deus" data-acao="adminModoDeus" aria-pressed="${modoDeusLigado(j)}">${modoDeusLigado(j) ? 'Desligar modo Deus' : '😇 Ligar modo Deus'}</button>`
+        : '<button class="btn fantasma btn-deus" disabled>😇 Modo Deus (ainda não disponível)</button>'}
+      <small>${modoDeusLigado(j) ? '<b>Ligado.</b> ' : ''}Você nunca perde a Mesa nem a run: o adversário não ganha tentos e as mãos não acabam. Rodadas e mãos ainda podem ser perdidas.</small></fieldset>
     <fieldset><legend>Cartas da sua mão</legend><div class="linha">${cartas}</div>
       <small>Dica: com a vira de 4, a manilha é o 5; com vira 3, a manilha é o 4.</small></fieldset>
     ${rd ? `<fieldset><legend>Vira</legend><div class="linha carta-escolha">

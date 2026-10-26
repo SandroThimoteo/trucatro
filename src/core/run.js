@@ -388,7 +388,8 @@ export class Jogo {
       tentosAdv: 0,
       poderUsos: 0,
     };
-    r.mesa.tentosAdv = this.regrasMesa.tentosIniciais ?? 0;
+    // Modo Deus (admin): o adversário não começa com tentos
+    r.mesa.tentosAdv = this.modoDeus ? 0 : (this.regrasMesa.tentosIniciais ?? 0);
     r.modMesa = null;
     r.resultadoEvento = null;
     r.avisos = [];
@@ -609,7 +610,7 @@ export class Jogo {
       rd.reveladas.push(s.pick(escondidas).id);
     } else if (poder.id === 'pendura') {
       r.reis += 3;
-      m.tentosAdv += 1;
+      if (!this.modoDeus) m.tentosAdv += 1;
     } else if (poder.id === 'vira_virada') {
       const vis = (c) => `${c.rank}${c.suit}`;
       const usadas = new Set([...m.mao.map((id) => vis(this.carta(id))), ...rd.maoAdv, ...(rd.maoParceiro ?? []), ...(rd.maoAdv2 ?? []), ...rd.viras].map((c) => (typeof c === 'string' ? c : vis(c))));
@@ -625,10 +626,10 @@ export class Jogo {
     }
 
     if (!gratis && poder.custo?.reis) r.reis -= poder.custo.reis;
-    if (!gratis && poder.custo?.tentos) m.tentosAdv += poder.custo.tentos;
+    if (!gratis && poder.custo?.tentos && !this.modoDeus) m.tentosAdv += poder.custo.tentos;
     m.poderUsos++;
     this.emit('OnPoderUsado', { poder: poder.id, texto });
-    if (m.tentosAdv >= this.tentosParaPerder) this.perderRun('tentos');
+    if (m.tentosAdv >= this.tentosParaPerder && !this.modoDeus) this.perderRun('tentos');
     return texto;
   }
 
@@ -637,6 +638,17 @@ export class Jogo {
 
   marcarTeste() {
     this.run.testada = true;
+  }
+
+  // Modo Deus: você nunca perde a Mesa nem a run (o adversário não ganha tentos e a última mão
+  // nunca acaba). Ainda dá para perder rodadas e mãos (sem pontos). Desligar volta ao normal.
+  get modoDeus() {
+    return !!this.run.modoDeus;
+  }
+
+  adminModoDeus(ligado) {
+    this.run.modoDeus = !!ligado;
+    if (ligado) this.marcarTeste();
   }
 
   // Troca a i-ésima carta da sua mão por outra (valor e naipe)
@@ -907,9 +919,11 @@ export class Jogo {
 
     m.pontos += pontos;
     // Segundo relógio: cada mão que o adversário leva vira tentos para ele
-    const tentos = st.vencedor === 1 ? st.pontos : 0;
+    const tentos = st.vencedor === 1 && !this.modoDeus ? st.pontos : 0;
     m.tentosAdv += tentos;
     m.maosRestantes = Math.max(0, m.maosRestantes - 1 - penalidade);
+    // Modo Deus: sem bater a meta, a última mão nunca acaba (nem com a penalidade de blefe)
+    if (this.modoDeus && m.pontos < m.meta && m.maosRestantes < 1) m.maosRestantes = 1;
     r.stats.maosJogadas++;
     r.stats.maiorMao = Math.max(r.stats.maiorMao, pontos);
     rd.resultado = {
@@ -984,6 +998,7 @@ export class Jogo {
   }
 
   perderRun(motivo = 'maos') {
+    if (this.modoDeus) return; // Modo Deus: nunca perde
     const r = this.run;
     r.stats.pontosTotais = (r.stats.pontosTotais ?? 0) + r.mesa.pontos;
     r.resultadoMesa = { venceu: false, pontos: r.mesa.pontos, meta: r.mesa.meta, tipo: r.mesa.tipo, motivo, tentos: r.mesa.tentosAdv };
