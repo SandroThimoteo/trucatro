@@ -210,3 +210,27 @@ test('a cara do adversário existe e às vezes mente', () => {
   }
   assert.ok(mentiras > 0 && mentiras < 60, `mentiras ${mentiras}`);
 });
+
+test('modo de testes: escolhe cartas, vira, personagem e itens; marca a run como testada', () => {
+  const j = naMesa('ADM');
+  j.adminVira('4', 'copas');
+  j.adminCarta(0, '5', 'paus');
+  const c = j.carta(j.run.mesa.mao[0]);
+  assert.deepEqual([c.rank, c.suit], ['5', 'paus']);
+  assert.equal(j.rodada.vira.rank, '4');
+  j.adminPersonagem('ze_fiado');
+  assert.equal(j.jogador.id, 'ze_fiado');
+  j.usarPoder(); j.usarPoder();
+  j.adminRecarregarPoder();
+  assert.equal(j.run.mesa.poderUsos, 0);
+  for (const cp of dados.comparsas.slice(0, 6)) j.adminComparsa(cp.id);
+  assert.equal(j.run.comparsas.length, 6);
+  j.adminConsumivel('causo', dados.causos[0].id);
+  j.adminValores({ reis: 50, tentos: 30, maos: 2 });
+  assert.equal(j.run.reis, 50);
+  assert.equal(j.run.mesa.tentosAdv, 11);
+  assert.equal(j.run.testada, true);
+  // a mão com o 5 de paus (vira 4) é Zap
+  if (j.podeAbrirParaIA()) j.comecarRodada();
+  else j.jogarCarta(j.run.mesa.mao[0]);
+});

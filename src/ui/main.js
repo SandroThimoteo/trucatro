@@ -57,6 +57,10 @@ const app = {
 
 const dupla = () => app.partida instanceof PartidaDupla;
 
+// Modo de testes: admin do site, dono do artifact no Claude, ou jogando em localhost com ?debug
+const podeTestar = () => !!(app.usuario?.conta?.admin || app.usuario?.conta?.dono
+  || (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).has('debug')));
+
 // ---------- perfil e salvamento ----------
 
 let timerSalvar = null;
@@ -139,8 +143,8 @@ function sincronizarPerfil() {
 async function enviarDesafio(r) {
   const res = resumoDesafio(r);
   const ja = app.perfil.desafios[res.dia];
-  r.desafioResultado = { ...res, valeu: !ja };
-  if (ja) return;
+  r.desafioResultado = { ...res, valeu: !ja && !r.testada, testada: !!r.testada };
+  if (ja || r.testada) return;
   app.perfil.desafios[res.dia] = { pontos: res.pontos, bairro: res.bairro, mesas: res.mesas };
   app.perfil.tampinhas += TAMPINHAS_DESAFIO;
   r.desafioResultado.tampinhas = TAMPINHAS_DESAFIO;
@@ -479,6 +483,32 @@ const acoes = {
     app.jogadorSel = id;
     const item = app.dados.bazarPorId[`jogador_${id}`];
     if (item) { equiparItem(app.dados, app.perfil, item.id); salvarPerfil(); }
+  },
+  adminCarta(i) {
+    const v = (id) => document.getElementById(id)?.value;
+    executar(() => { app.jogo.adminCarta(Number(i), v(`adm-r${i}`), v(`adm-s${i}`)); toast('Carta trocada'); }, { limparSel: true });
+  },
+  adminVira() {
+    const v = (id) => document.getElementById(id)?.value;
+    executar(() => { app.jogo.adminVira(v('adm-vr'), v('adm-vs')); toast('Vira trocada'); });
+  },
+  adminPersonagem() {
+    executar(() => { app.jogo.adminPersonagem(document.getElementById('adm-jog').value); toast(`Agora você é ${app.jogo.jogador.nome}`); });
+  },
+  adminRecarregar() { executar(() => { app.jogo.adminRecarregarPoder(); toast('Poder recarregado'); }); },
+  adminComparsa() {
+    executar(() => { app.jogo.adminComparsa(document.getElementById('adm-comp').value); toast('Comparsa adicionado'); });
+  },
+  adminConsumivel() {
+    const [tipo, id] = document.getElementById('adm-cons').value.split(':');
+    executar(() => { app.jogo.adminConsumivel(tipo, id); toast('Item adicionado'); });
+  },
+  adminValores() {
+    const n = (id) => { const x = document.getElementById(id)?.value; return x === '' || x == null ? null : Number(x); };
+    executar(() => {
+      app.jogo.adminValores({ reis: n('adm-reis'), tentos: n('adm-tentos'), maos: n('adm-maos'), trocas: n('adm-trocas'), pontos: n('adm-pontos') });
+      toast('Valores aplicados');
+    });
   },
   irBazarPersonagem() { app.tela = 'bazar'; app.bazarCat = 'personagem'; },
   poder() {
@@ -1288,6 +1318,7 @@ function lousaMesa(j) {
       <div class="linha-giz"><span class="rotulo">Réis</span><span class="num" style="color:var(--lampada)">${r.reis}</span></div>
     </div>
     ${contaHTML()}
+    ${podeTestar() ? `<button class="btn fantasma peq acao btn-teste" data-acao="modal" data-arg="testes">🛠️ Testes (admin)${r.testada ? ' · usado' : ''}</button>` : ''}
     <div class="botoes botoes-lousa" style="margin-top:12px">
       <button class="btn fantasma peq acao" data-acao="modal" data-arg="baralho">Baralho (${r.deck.length})</button>
       <button class="btn fantasma peq acao" data-acao="modal" data-arg="jogadas">Jogadas</button>
@@ -1638,7 +1669,7 @@ function telaFim() {
   const blocoDesafio = d ? `<div class="lousa resultado-desafio">
       <span class="rotulo">Desafio do dia ${esc(d.dia)}</span>
       <div class="grande">${fmt(d.pontos)}</div>
-      <p>${d.valeu ? (d.posicao ? `Você está em <b>${d.posicao}º</b> no ranking de hoje!` : d.erro ? `Não deu para enviar ao ranking: ${esc(d.erro)}` : 'Resultado enviado.') : 'Treino: só a primeira tentativa do dia vale para o ranking.'}</p>
+      <p>${d.testada ? 'Run com o modo de testes: não vale para o ranking.' : d.valeu ? (d.posicao ? `Você está em <b>${d.posicao}º</b> no ranking de hoje!` : d.erro ? `Não deu para enviar ao ranking: ${esc(d.erro)}` : 'Resultado enviado.') : 'Treino: só a primeira tentativa do dia vale para o ranking.'}</p>
       ${d.tampinhas ? `<div class="drop-grande"><i class="tampa" aria-hidden="true"></i>+${d.tampinhas} Tampinhas por jogar o desafio</div>` : ''}
       <button class="btn amarelo acao" data-acao="irDesafio">Ver ranking</button>
     </div>` : '';
@@ -1914,6 +1945,51 @@ function detalheConteudo({ tipo, id }) {
 
 // ---------- modais ----------
 
+// Painel do admin: escolher cartas, vira, personagem/poder, Comparsas, itens e valores da Mesa
+function painelTestes(j) {
+  const r = j.run;
+  const m = r.mesa;
+  const rd = j.rodada;
+  const opcoes = (lista, sel) => lista.map(([v, n]) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  const ranks = RANKS.map((x) => [x, x]);
+  const naipes = SUITS.map((x) => [x, SUIT_NOME[x]]);
+  const cartas = m && rd ? m.mao.map((id, i) => {
+    const c = j.carta(id);
+    return `<div class="carta-escolha">${i + 1}ª: <select id="adm-r${i}" aria-label="Valor da carta ${i + 1}">${opcoes(ranks, c.rank)}</select>
+      <select id="adm-s${i}" aria-label="Naipe da carta ${i + 1}">${opcoes(naipes, c.suit)}</select>
+      <button class="btn peq amarelo acao" data-acao="adminCarta" data-arg="${i}">Trocar</button></div>`;
+  }).join('') : '<small>Sente numa Mesa para mexer nas cartas.</small>';
+  const vira = rd?.vira ?? rd?.viras?.[0];
+  const cons = [...app.dados.causos.map((c) => [`causo:${c.id}`, `Causo: ${c.nome}`]), ...app.dados.simpatias.map((s) => [`simpatia:${s.id}`, `Simpatia: ${s.nome}`])];
+  return `<div class="painel-teste">
+    <p><small>Só você vê isto. Uma run que usa os testes não vale para o ranking do Desafio do dia.</small></p>
+    <fieldset><legend>Cartas da sua mão</legend><div class="linha">${cartas}</div>
+      <small>Dica: com a vira de 4, a manilha é o 5; com vira 3, a manilha é o 4.</small></fieldset>
+    ${rd ? `<fieldset><legend>Vira</legend><div class="linha carta-escolha">
+      <select id="adm-vr" aria-label="Valor da vira">${opcoes(ranks, vira?.rank)}</select>
+      <select id="adm-vs" aria-label="Naipe da vira">${opcoes(naipes, vira?.suit)}</select>
+      <button class="btn peq amarelo acao" data-acao="adminVira">Trocar vira</button></div></fieldset>` : ''}
+    <fieldset><legend>Personagem e poder</legend><div class="linha">
+      <select id="adm-jog" aria-label="Personagem">${opcoes(app.dados.jogadores.map((x) => [x.id, `${x.nome}: ${x.poder.nome}`]), r.jogador)}</select>
+      <button class="btn peq amarelo acao" data-acao="adminPersonagem">Trocar</button>
+      <button class="btn peq acao" data-acao="adminRecarregar">Recarregar poder</button></div></fieldset>
+    <fieldset><legend>Comparsas</legend><div class="linha">
+      <select id="adm-comp" aria-label="Comparsa">${opcoes(app.dados.comparsas.map((c) => [c.id, `${c.nome} (${NOME_RARIDADE[c.raridade]})`]))}</select>
+      <button class="btn peq amarelo acao" data-acao="adminComparsa">Adicionar</button></div>
+      <small>Se os espaços estiverem cheios, ganha um espaço a mais.</small></fieldset>
+    <fieldset><legend>Causos e Simpatias</legend><div class="linha">
+      <select id="adm-cons" aria-label="Causo ou Simpatia">${opcoes(cons)}</select>
+      <button class="btn peq amarelo acao" data-acao="adminConsumivel">Adicionar</button></div></fieldset>
+    <fieldset><legend>Valores</legend><div class="linha">
+      <label>Réis <input id="adm-reis" type="number" min="0" value="${r.reis}" style="width:6em"></label>
+      ${m ? `<label>Tentos dele <input id="adm-tentos" type="number" min="0" max="11" value="${m.tentosAdv}" style="width:5em"></label>
+      <label>Mãos <input id="adm-maos" type="number" min="1" value="${m.maosRestantes}" style="width:5em"></label>
+      <label>Trocas <input id="adm-trocas" type="number" min="0" value="${m.trocasRestantes}" style="width:5em"></label>
+      <label>Pontos <input id="adm-pontos" type="number" min="0" value="${m.pontos}" style="width:7em"></label>` : ''}
+      <button class="btn peq amarelo acao" data-acao="adminValores">Aplicar</button></div></fieldset>
+  </div>`;
+}
+
 function modalHTML() {
   if (!app.modal) return '';
   let titulo = '';
@@ -1943,6 +2019,10 @@ function modalHTML() {
       <label class="faixa-som"><span>Tudo mudo</span><input type="checkbox" ${o.mudo ? 'checked' : ''} data-opcao="mudo"></label>
       <label class="faixa-som"><span>Efeitos leves (sem tremida nem clarões)</span><input type="checkbox" ${o.efeitosLeves ? 'checked' : ''} data-opcao="efeitosLeves"></label>
       <p class="rotulo">${audio.temVoz() ? 'As vozes usam a fala do seu navegador; o sotaque depende das vozes instaladas no aparelho.' : 'Este navegador não tem voz sintetizada: as falas aparecem só em balões.'}</p>`;
+  } else if (app.modal === 'testes' && app.jogo && podeTestar()) {
+    titulo = '🛠️ Modo de testes';
+    larga = true;
+    corpo = painelTestes(app.jogo);
   } else if (app.modal === 'ajuda') {
     titulo = 'Como jogar';
     larga = true;

@@ -66,6 +66,7 @@ async function contaClaude() {
   const id = await user.id();
   if (!id) return null;
   const me = await user.me();
+  const dono = await user.isOwner().catch(() => false);
   const doc = db.doc(`data/users/${id}/perfil`);
   let gravando = Promise.resolve();
   // Ranking do dia no banco compartilhado do artifact: guarda só o id de quem jogou;
@@ -89,6 +90,7 @@ async function contaClaude() {
     tipo: 'claude',
     nome: me.name || 'Você',
     logado: true,
+    dono,
     desafio,
     async carregar() {
       const snap = await doc.get();

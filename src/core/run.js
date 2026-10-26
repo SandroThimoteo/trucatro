@@ -632,6 +632,78 @@ export class Jogo {
     return texto;
   }
 
+  // ---------- modo de testes (admin) ----------
+  // Atalhos para o admin testar o jogo. Marcam a run como "testada": não vale para o ranking.
+
+  marcarTeste() {
+    this.run.testada = true;
+  }
+
+  // Troca a i-ésima carta da sua mão por outra (valor e naipe)
+  adminCarta(i, rank, suit) {
+    const m = this.run.mesa;
+    const rd = this.rodada;
+    if (!m || !rd) throw new Error('Só durante uma Mesa');
+    if (!RANKS.includes(rank) || !SUITS.includes(suit)) throw new Error('Carta inválida');
+    const id = m.mao[i];
+    if (!id) throw new Error('Não tem carta nessa posição');
+    const carta = this.carta(id);
+    Object.assign(carta, { rank, suit });
+    const naMesa = rd.mao?.maos[0].find((c) => c.id === id);
+    if (naMesa) Object.assign(naMesa, { rank, suit });
+    this.marcarTeste();
+  }
+
+  adminVira(rank, suit) {
+    const rd = this.rodada;
+    if (!rd) throw new Error('Só durante uma Mesa');
+    rd.vira = { id: `o-adm-${rank}${suit}`, rank, suit, bonusFichas: 0, melhoria: null, selo: null };
+    rd.viras = [rd.vira];
+    if (rd.mao) rd.mao.vira = rd.vira;
+    if (rd.fase === 'vira') rd.fase = 'troca';
+    this.atualizarCara();
+    this.marcarTeste();
+  }
+
+  adminPersonagem(id) {
+    if (!this.dados.jogadoresPorId[id]) throw new Error('Personagem não existe');
+    this.run.jogador = id;
+    if (this.run.mesa) this.run.mesa.poderUsos = 0;
+    this.marcarTeste();
+  }
+
+  adminRecarregarPoder() {
+    if (this.run.mesa) this.run.mesa.poderUsos = 0;
+    this.marcarTeste();
+  }
+
+  adminComparsa(id) {
+    const r = this.run;
+    if (!this.dados.comparsasPorId[id]) throw new Error('Comparsa não existe');
+    if (r.comparsas.length >= r.slotsComparsa) r.slotsComparsa++;
+    this.adicionarComparsa(id);
+    this.marcarTeste();
+  }
+
+  adminConsumivel(tipo, id) {
+    const r = this.run;
+    if (!(tipo === 'causo' ? this.dados.causosPorId : this.dados.simpatiasPorId)[id]) throw new Error('Item não existe');
+    if (r.consumiveis.length >= r.slotsConsumivel) r.slotsConsumivel++;
+    r.consumiveis.push({ tipo, id });
+    this.marcarTeste();
+  }
+
+  adminValores({ reis, tentos, maos, trocas, pontos } = {}) {
+    const r = this.run;
+    const m = r.mesa;
+    if (reis != null) r.reis = Math.max(0, Math.floor(reis));
+    if (m && tentos != null) m.tentosAdv = Math.max(0, Math.min(this.tentosParaPerder - 1, Math.floor(tentos)));
+    if (m && maos != null) m.maosRestantes = Math.max(1, Math.floor(maos));
+    if (m && trocas != null) m.trocasRestantes = Math.max(0, Math.floor(trocas));
+    if (m && pontos != null) m.pontos = Math.max(0, Math.floor(pontos));
+    this.marcarTeste();
+  }
+
   // Mesa Dupla: o sinal que você faz para o parceiro antes da primeira rodada
   sinalizar(chave) {
     const rd = this.rodada;
