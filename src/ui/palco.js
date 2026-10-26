@@ -62,21 +62,50 @@ function caminho(a, b, n, amp, onda = false, fase = 0) {
   return pts;
 }
 
-function tracar(svg, pts, extra = '') {
-  for (const classe of ['brilho', 'nucleo']) {
+// Cor própria do Comparsa (campo "cor" em data/comparsas.json). Sem cor: vale a cor do Bazar.
+// cor2 é o miolo do raio (a cor puxada para o branco); "claro" pede contorno escuro.
+function corDe(def) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(def?.cor ?? '');
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  const rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const cor2 = '#' + rgb.map((c) => Math.round(c + (255 - c) * 0.7).toString(16).padStart(2, '0')).join('');
+  const luz = (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255;
+  return { cor: `#${m[1]}`, cor2, claro: luz > 0.75 };
+}
+
+function pintar(alvo, c) {
+  if (!alvo) return;
+  if (c) {
+    alvo.style.setProperty('--raio-cor', c.cor);
+    alvo.style.setProperty('--raio-cor2', c.cor2);
+  } else {
+    alvo.style.removeProperty('--raio-cor');
+    alvo.style.removeProperty('--raio-cor2');
+  }
+}
+
+function tracar(svg, pts, extra = '', c = null) {
+  const classes = c?.claro ? ['contorno', 'brilho', 'nucleo'] : ['brilho', 'nucleo'];
+  for (const classe of classes) {
     const l = document.createElementNS(ns, 'polyline');
     l.setAttribute('points', pts.map((q) => q.join(',')).join(' '));
-    l.setAttribute('class', `raio ${classe} ${extra}`);
+    l.setAttribute('class', `raio ${classe} ${extra} ${c ? 'proprio' : ''}`);
+    pintar(l, c);
     svg.appendChild(l);
     setTimeout(() => l.remove(), 750);
   }
 }
 
-// Raio do slot do Comparsa até o alvo (carta ou total)
-function raio(uid, alvo, forte = false) {
+// Raio do slot do Comparsa até o alvo (carta ou total), na cor do Comparsa se ele tiver uma
+function raio(uid, alvo, forte = false, def = null) {
   const slot = document.querySelector(`.slot[data-uid="${uid}"]`);
   const svg = el?.querySelector('.raios');
   if (!slot || !svg || !alvo) return;
+  const c = corDe(def);
+  const tr = (pts, extra = '') => tracar(svg, pts, extra, c);
+  pintar(slot, c);
+  slot.classList.toggle('raio-claro', !!c?.claro);
   slot.classList.remove('pulo', 'disparou');
   void slot.offsetWidth;
   slot.classList.add('pulo', 'disparou');
@@ -84,27 +113,28 @@ function raio(uid, alvo, forte = false) {
   const b = centroDe(alvo);
   const f = forma();
   if (f === 'corrente') {
-    tracar(svg, caminho(a, b, 40, 26, true));
-    tracar(svg, caminho(a, b, 40, 26, true, Math.PI), 'fino');
+    tr(caminho(a, b, 40, 26, true));
+    tr(caminho(a, b, 40, 26, true, Math.PI), 'fino');
   } else if (f === 'duplo') {
-    tracar(svg, caminho({ x: a.x - 10, y: a.y }, b, 8, 70));
-    tracar(svg, caminho({ x: a.x + 10, y: a.y }, b, 8, 70));
+    tr(caminho({ x: a.x - 10, y: a.y }, b, 8, 70));
+    tr(caminho({ x: a.x + 10, y: a.y }, b, 8, 70));
   } else {
     const pts = caminho(a, b, f === 'galho' ? 10 : 7, 60);
-    tracar(svg, pts);
+    tr(pts);
     // galhos: pedaços que saem do meio do raio e morrem no ar
     const galhos = f === 'galho' ? 4 : forte ? 2 : 1;
     for (let g = 0; g < galhos; g++) {
       const [x, y] = pts[1 + Math.floor(Math.random() * (pts.length - 3))];
       const ponta = { x: x + (Math.random() - 0.5) * 160, y: y + (Math.random() - 0.2) * 120 };
-      tracar(svg, caminho({ x, y }, ponta, 4, 30), 'fino');
+      tr(caminho({ x, y }, ponta, 4, 30), 'fino');
     }
   }
-  atingir(alvo, forte);
+  atingir(alvo, forte, c);
 }
 
 // Impacto: a carta pisca, solta faíscas e uma onda de choque
-function atingir(alvo, forte = false) {
+function atingir(alvo, forte = false, cor = null) {
+  pintar(alvo, cor);
   alvo.classList.remove('atingida');
   void alvo.offsetWidth;
   alvo.classList.add('atingida');
@@ -114,6 +144,7 @@ function atingir(alvo, forte = false) {
   onda.className = `onda ${forte ? 'forte' : ''}`;
   onda.style.left = `${c.x}px`;
   onda.style.top = `${c.y}px`;
+  pintar(onda, cor);
   el.appendChild(onda);
   setTimeout(() => onda.remove(), 700);
   const n = forte ? 22 : 12;
@@ -127,6 +158,7 @@ function atingir(alvo, forte = false) {
     s.style.setProperty('--dx', `${Math.cos(ang) * dist}px`);
     s.style.setProperty('--dy', `${Math.sin(ang) * dist}px`);
     s.style.setProperty('--rot', `${(ang * 180) / Math.PI}deg`);
+    pintar(s, cor);
     el.appendChild(s);
     setTimeout(() => s.remove(), 750);
   }
@@ -156,6 +188,35 @@ function saltar(alvo, texto, classe) {
   setTimeout(() => f.remove(), 1100);
 }
 
+// Som do Comparsa (audio.tocarComparsa, do agente audio); sem ele, o raio comum
+function somComparsa(def, passo) {
+  if (def?.som && audio.tocarComparsa) audio.tocarComparsa(def.som, passo);
+  else audio.tocar('raio', passo);
+}
+
+// Balão com a fala do Comparsa saindo do slot dele (no máximo 1 por rodada pontuada)
+function balao(uid, texto) {
+  const slot = document.querySelector(`.slot[data-uid="${uid}"]`);
+  if (!el || !slot || !texto) return false;
+  const r = slot.getBoundingClientRect();
+  // slot escondido ou fora da tela (faixa rolada no celular): sem balão
+  if (r.width === 0 || r.right < 0 || r.left > innerWidth) return false;
+  const b = document.createElement('div');
+  const abaixo = r.top < 90;
+  b.className = `balao-comparsa ${abaixo ? 'abaixo' : ''}`;
+  b.textContent = texto;
+  const cor = slot.style.getPropertyValue('--raio-cor');
+  if (cor) b.style.setProperty('--raio-cor', cor);
+  el.appendChild(b);
+  const meia = b.offsetWidth / 2;
+  const x = Math.min(Math.max(r.left + r.width / 2, meia + 8), innerWidth - meia - 8);
+  b.style.left = `${x}px`;
+  b.style.top = `${abaixo ? r.bottom + 12 : r.top - 12}px`;
+  b.style.setProperty('--seta', `${Math.min(Math.max(r.left + r.width / 2 - x, 14 - meia), meia - 14)}px`);
+  setTimeout(() => b.remove(), 2400);
+  return true;
+}
+
 function caixas(fichas, mult, qual) {
   const conta = el?.querySelector('.palco-conta');
   if (!conta) return;
@@ -177,7 +238,7 @@ function textoPasso(p) {
 }
 
 // ev: OnVazaPontuada { carta, jogada, passos, total } · cartaHtml: a carta já desenhada
-export async function palcoRodada(ev, { cartaHtml, nomeJogada, nomeComparsa, ms }) {
+export async function palcoRodada(ev, { cartaHtml, nomeJogada, nomeComparsa, defComparsa = () => null, falaComparsa = () => null, ms }) {
   abrir(`<div class="palco-carta">${cartaHtml}</div>
     <div class="palco-conta"><div class="caixa f">0</div><span class="num">×</span><div class="caixa m">0</div></div>
     <div class="palco-origem"></div>`, nomeJogada);
@@ -185,12 +246,15 @@ export async function palcoRodada(ev, { cartaHtml, nomeJogada, nomeComparsa, ms 
   const origem = el.querySelector('.palco-origem');
   await espera(ms.entrada);
   let i = 0;
+  let falou = false;
   for (const p of ev.passos) {
     const [texto, classe] = textoPasso(p);
     const forte = p.tipo === 'xmult';
     if (p.comparsa) {
-      raio(p.comparsa, carta, forte);
-      audio.tocar('raio', i);
+      const def = defComparsa(p.comparsa);
+      raio(p.comparsa, carta, forte, def);
+      somComparsa(def, i);
+      if (!falou && Math.random() < 0.7) falou = balao(p.comparsa, falaComparsa(p.comparsa));
     } else {
       atingir(carta, forte);
       audio.tocar('ponto', i);
@@ -216,12 +280,13 @@ export async function palcoRodada(ev, { cartaHtml, nomeJogada, nomeComparsa, ms 
 }
 
 // ev: MaoPontuada { passos: [{tipo:'soma'|'x', valor, origem, total, comparsa}] }
-export async function palcoMao(ev, { titulo, nomeComparsa, ms }) {
+export async function palcoMao(ev, { titulo, nomeComparsa, defComparsa = () => null, falaComparsa = () => null, ms }) {
   abrir(`<ul class="palco-linhas"></ul>`, titulo);
   const linhas = el.querySelector('.palco-linhas');
   const total = el.querySelector('.palco-total');
   await espera(ms.entrada / 2);
   let i = 0;
+  let falou = false;
   for (const p of ev.passos) {
     const li = document.createElement('li');
     const origem = p.comparsa ? nomeComparsa(p.comparsa) ?? p.origem : p.origem;
@@ -233,8 +298,11 @@ export async function palcoMao(ev, { titulo, nomeComparsa, ms }) {
     total.classList.add('pop', 'aparece');
     aquecer((i + 1) / ev.passos.length, p.tipo === 'x');
     if (p.comparsa) {
-      raio(p.comparsa, total, p.tipo === 'x');
-      audio.tocar('raio', 4 + i);
+      const def = defComparsa(p.comparsa);
+      raio(p.comparsa, total, p.tipo === 'x', def);
+      somComparsa(def, 4 + i);
+      // fala: no máximo 1 balão por mão (o Torcedor Sofredor só dispara aqui)
+      if (!falou) falou = balao(p.comparsa, falaComparsa(p.comparsa));
     } else {
       if (p.tipo === 'x') atingir(total, true);
       audio.tocar('ponto', 4 + i);

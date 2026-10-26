@@ -27,7 +27,7 @@ Ficha de voz de cada personagem, para gerar as falas com IA (ElevenLabs, OpenAI 
 | 📐 Professor Girafa | Mesa do Fundo | masculina, médio | 50 | paulistano formal |
 | 🎩 Tião Malandragem | Mesa do Fundo | masculina, médio-grave | 45 | carioca radicado em SP |
 | 🍀 Dona Zefa | Mesa do Fundo | feminina, agudo | 65 | nordestina |
-| 🎱 Careca do Bingo | Mesa do Fundo | masculina, médio | 55 | paulistano |
+| 🎤 Careca do Bingo | Mesa do Fundo | masculina, médio | 55 | paulistano |
 | 💁‍♀️ Loira do Fiado | Mesa do Fundo | feminina, médio | 42 | paulistana |
 | 👮 Cabo Ronaldo | Mesa do Fundo | masculina, médio-grave | 36 | paulistano |
 | 🗣️ Dona Cotinha | Chefão | feminina, agudo | 70 | paulistana de vila |
@@ -38,6 +38,11 @@ Ficha de voz de cada personagem, para gerar as falas com IA (ElevenLabs, OpenAI 
 | 🌙 Seu Lunático | Chefão | masculina, médio | 63 | paulistano boêmio |
 | 🧶 Tia Zulmira | Chefão | feminina, agudo | 80 | interior paulista |
 | 👑 Rei do Truco | Chefão | masculina, gravíssimo | ? | neutro, sem sotaque |
+| ✏️ Marcador de Giz | Comparsa | masculina, médio-grave | 70 | paulistano antigo |
+| 📻 Torcedor Sofredor | Comparsa | masculina, médio | 58 | paulistano da zona norte |
+| 💪 Brigão da Esquina | Comparsa | masculina, grave | 34 | paulistano de periferia |
+| ⚽ Técnico da Várzea | Comparsa | masculina, rouco | 55 | paulistano da zona sul |
+| 🎱 Rei da Sinuca | Comparsa | masculina, grave e macio | 60 | paulistano boêmio do centro |
 
 ## Mesas do Bar
 
@@ -425,7 +430,7 @@ A 65-year-old cheerful Brazilian woman from Pernambuco living in São Paulo. Hig
 | Perdeu a rodada | `dona_zefa_perdeuVaza_2.mp3` | Vixe. |
 | Perdeu a Mesa | `dona_zefa_derrota_1.mp3` | Leva meu trevo, você precisa mais. |
 
-### 🎱 Careca do Bingo, locutor do bingo
+### 🎤 Careca do Bingo, locutor do bingo
 
 > Canta as pedras do bingo e acha mão de onze coisa de amador.
 
@@ -769,6 +774,135 @@ A mysterious Brazilian crime-boss figure, age unknown. Very deep, resonant, slow
 | Cena de entrada | `rei_do_truco_intro_1.mp3` | Oito bairros. Oito botecos. Todos são meus. |
 | Cena de entrada | `rei_do_truco_intro_2.mp3` | Ninguém nunca chegou até a minha mesa. |
 | Cena de entrada | `rei_do_truco_intro_3.mp3` | Ajoelha, pega suas cartas... e reza. |
+
+## Comparsas
+
+Os Comparsas falam uma vez quando disparam e dão pontos (balão saindo do slot). As falas ficam em `data/falas-comparsas.json`; o jogo sorteia uma. Arquivos: `<id>_dispara_<n>.mp3`.
+
+### ✏️ Marcador de Giz, o homem da lousa que conta os tentos
+
+> Fica de pé do lado da lousa do boteco desde os anos 70, com um toco de giz atrás da orelha. Nunca errou uma conta.
+
+- **Voz:** masculina, uns 70 anos
+- **Sotaque:** paulistano antigo
+- **Timbre:** médio-grave, seco, um pouco anasalado
+- **Jeito de falar:** metódico e satisfeito, fala como quem anota; pausa curta antes de dar o veredito
+- **Ajustes:** estabilidade 60, estilo 25
+
+**Prompt (Voice Design):**
+
+```text
+A 70-year-old Brazilian man who keeps score on a chalkboard in an old São Paulo bar. Dry, slightly nasal mid-low voice, precise and methodical, quietly pleased with himself, like an old bookkeeper announcing a tally. Brazilian Portuguese.
+```
+
+**Falas do jogo:**
+
+| Momento | Arquivo | Fala |
+|---|---|---|
+| Dispara | `marcador_de_giz_dispara_1.mp3` | Risquei mais um aqui na lousa! |
+| Dispara | `marcador_de_giz_dispara_2.mp3` | Anotado. Quem conta não erra. |
+| Dispara | `marcador_de_giz_dispara_3.mp3` | Cada tento dele vira giz pra você! |
+| Dispara | `marcador_de_giz_dispara_4.mp3` | Tá na lousa, tá valendo! |
+
+### 📻 Torcedor Sofredor, o do radinho de pilha
+
+> Radinho colado na orelha, camisa do time desbotada. Sofre o jogo inteiro e comemora como final de campeonato.
+
+- **Voz:** masculina, uns 58 anos
+- **Sotaque:** paulistano da zona norte
+- **Timbre:** médio, sobe para o agudo quando grita
+- **Jeito de falar:** aflito, suspira, e de repente explode de alegria; gritos de gol nas palavras fortes
+- **Ajustes:** estabilidade 25, estilo 70
+
+**Prompt (Voice Design):**
+
+```text
+A 58-year-old Brazilian football fan from São Paulo holding a pocket radio to his ear. Mid voice that cracks into high-pitched shouting, anxious and sighing one moment, exploding in joyful celebration the next, like a fan after a last-minute goal. Brazilian Portuguese.
+```
+
+**Falas do jogo:**
+
+| Momento | Arquivo | Fala |
+|---|---|---|
+| Dispara | `torcedor_sofredor_dispara_1.mp3` | Sofri, mas valeu! É NA RAÇA! |
+| Dispara | `torcedor_sofredor_dispara_2.mp3` | Ai, meu coração... GANHAMOS! |
+| Dispara | `torcedor_sofredor_dispara_3.mp3` | Quase enfartei! Foi no sufoco! |
+| Dispara | `torcedor_sofredor_dispara_4.mp3` | Aumenta o radinho, é NA RAÇA! |
+
+### 💪 Brigão da Esquina, o valentão do bairro
+
+> Encostado no poste da esquina, regata e corrente no pescoço. Adora quando alguém aceita o desafio.
+
+- **Voz:** masculina, uns 34 anos
+- **Sotaque:** paulistano de periferia, gíria de rua
+- **Timbre:** grave, encorpado, peito estufado
+- **Jeito de falar:** provocador, ri com desdém, fala alto e devagar para intimidar
+- **Ajustes:** estabilidade 40, estilo 55
+
+**Prompt (Voice Design):**
+
+```text
+A 34-year-old tough guy from the outskirts of São Paulo who hangs out on the street corner. Deep, chesty, loud voice, taunting and cocky, with a mocking laugh, speaks slowly to intimidate. Brazilian Portuguese with street slang.
+```
+
+**Falas do jogo:**
+
+| Momento | Arquivo | Fala |
+|---|---|---|
+| Dispara | `brigao_da_esquina_dispara_1.mp3` | Aceitou? Então segura, meu chapa! |
+| Dispara | `brigao_da_esquina_dispara_2.mp3` | Topou a briga? Agora aguenta! |
+| Dispara | `brigao_da_esquina_dispara_3.mp3` | Ninguém encara a esquina à toa! |
+| Dispara | `brigao_da_esquina_dispara_4.mp3` | Aceitou o truco? Que coragem, hein! |
+
+### ⚽ Técnico da Várzea, o professor do time do bairro
+
+> Boné, apito no pescoço e prancheta riscada. Jura que toda jogada foi ensaiada no treino de quinta.
+
+- **Voz:** masculina, uns 55 anos
+- **Sotaque:** paulistano da zona sul
+- **Timbre:** rouco de tanto gritar na beira do campo
+- **Jeito de falar:** gritado e ritmado, como quem orienta o time de longe; orgulhoso quando a jogada sai
+- **Ajustes:** estabilidade 35, estilo 60
+
+**Prompt (Voice Design):**
+
+```text
+A 55-year-old amateur football coach from a São Paulo neighborhood league. Hoarse, worn-out voice from shouting on the sidelines, rhythmic and commanding, proud when a rehearsed play works. Brazilian Portuguese.
+```
+
+**Falas do jogo:**
+
+| Momento | Arquivo | Fala |
+|---|---|---|
+| Dispara | `tecnico_da_varzea_dispara_1.mp3` | Jogada ensaiada, igual no treino! |
+| Dispara | `tecnico_da_varzea_dispara_2.mp3` | Toca, toca! Tá tudo no esquema! |
+| Dispara | `tecnico_da_varzea_dispara_3.mp3` | Prancheta não mente, moleque! |
+| Dispara | `tecnico_da_varzea_dispara_4.mp3` | Treinamos isso a semana toda! |
+
+### 🎱 Rei da Sinuca, o sinuqueiro do salão
+
+> Taco próprio no estojo, chapéu panamá e giz azul no bolso. Diz que encaçapa as quatro manilhas como quem mata a bola sete.
+
+- **Voz:** masculina, uns 60 anos
+- **Sotaque:** paulistano boêmio do centro
+- **Timbre:** grave, macio, aveludado
+- **Jeito de falar:** sem pressa, elegante, confiante; fala baixo como quem não precisa provar nada
+- **Ajustes:** estabilidade 65, estilo 30
+
+**Prompt (Voice Design):**
+
+```text
+A 60-year-old Brazilian pool shark from downtown São Paulo pool halls. Deep, smooth, velvety voice, unhurried and elegant, quietly confident, like a bohemian who never misses a shot. Brazilian Portuguese.
+```
+
+**Falas do jogo:**
+
+| Momento | Arquivo | Fala |
+|---|---|---|
+| Dispara | `rei_da_sinuca_dispara_1.mp3` | Encaçapei mais uma manilha! |
+| Dispara | `rei_da_sinuca_dispara_2.mp3` | Taco, giz e caçapa. Próxima! |
+| Dispara | `rei_da_sinuca_dispara_3.mp3` | Tacada limpa, meu jovem. |
+| Dispara | `rei_da_sinuca_dispara_4.mp3` | Canta a caçapa: essa é do canto! |
 
 ## Você (o jogador)
 

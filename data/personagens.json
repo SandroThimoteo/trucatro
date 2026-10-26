@@ -179,7 +179,7 @@
       "perdeuVaza": ["Bate na madeira.", "Vixe."],
       "derrota": ["Leva meu trevo, você precisa mais."]
     } },
-  { "id": "careca_do_bingo", "tipo": "fundo", "nome": "Careca do Bingo", "titulo": "locutor do bingo", "avatar": "🎱", "perfil": "mesa_fundo",
+  { "id": "careca_do_bingo", "tipo": "fundo", "nome": "Careca do Bingo", "titulo": "locutor do bingo", "avatar": "🎤", "perfil": "mesa_fundo",
     "bio": "Canta as pedras do bingo e acha mão de onze coisa de amador.",
     "regra": "Sem mão de onze: a última mão é uma mão normal",
     "detalhe": "Nesta Mesa a última mão não é mão de onze: vale 1, aceita truco e não dá o bônus da Jogada Mão de Onze.",

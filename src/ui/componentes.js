@@ -55,11 +55,24 @@ export function avatarHTML(pessoa, grande = false) {
   return `<span class="avatar ${grande ? 'grande' : ''} ${pessoa.tipo === 'chefao' ? 'chefe' : ''}" aria-hidden="true">${esc(pessoa.avatar)}</span>`;
 }
 
+// Rosto do Comparsa (emoji num círculo na cor do raio dele). Comparsas antigos sem avatar: nada.
+export function avatarComparsa(def) {
+  if (!def?.avatar) return '';
+  const cor = /^#[0-9a-f]{3,8}$/i.test(def.cor ?? '') ? ` style="--comp-cor:${def.cor}"` : '';
+  return `<span class="comp-avatar"${cor} aria-hidden="true">${esc(def.avatar)}</span>`;
+}
+
+// Nome do Comparsa com o avatar na frente (quando tiver)
+export function nomeComAvatar(def, tag = 'b') {
+  if (!def.avatar) return `<${tag}>${esc(def.nome)}</${tag}>`;
+  return `<${tag} class="com-avatar">${avatarComparsa(def)}<span>${esc(def.nome)}</span></${tag}>`;
+}
+
 export function slotComparsa(def, inst, extras = '') {
   return `<div class="slot ${inst?.desativada ? 'desativada' : ''}" ${inst ? `data-uid="${inst.uid}"` : ''}>
     ${infoBtn('comparsa', def.id, def.nome)}
     <span class="raridade r-${def.raridade}">${NOME_RARIDADE[def.raridade]}</span>
-    <b>${esc(def.nome)}</b>
+    ${nomeComAvatar(def)}
     <span>${esc(def.descricao)}</span>
     ${inst?.desativada ? '<em>Desativado nesta Mesa</em>' : ''}
     ${extras}

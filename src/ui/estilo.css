@@ -1098,3 +1098,48 @@ body[style*="--cenario"]::before { opacity: 1; }
 .painel-teste select, .painel-teste input { font: inherit; background: #151c18; color: var(--giz); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 6px; padding: 6px 8px; }
 .painel-teste .carta-escolha { display: flex; gap: 4px; align-items: center; }
 .painel-teste small { color: var(--giz-fraco); }
+
+/* ---------- Comparsas com rosto, cor e fala (avatar/cor em data/comparsas.json) ---------- */
+.com-avatar { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.com-avatar > span:last-child { min-width: 0; }
+.comp-avatar {
+  flex: none; width: 26px; height: 26px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 0.95rem; line-height: 1; font-family: 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif;
+  background: radial-gradient(circle at 35% 30%, #fff6dc, var(--papel-2));
+  /* anel na cor do raio + fio escuro por fora, para a cor clara (giz) não sumir no papel */
+  box-shadow: 0 0 0 2px var(--comp-cor, var(--papel-2)), 0 0 0 3px rgba(29, 24, 18, 0.45);
+  margin: 2px 2px 2px 3px;
+}
+.ficha h3.com-avatar { gap: 9px; }
+.ficha h3.com-avatar .comp-avatar { width: 34px; height: 34px; font-size: 1.2rem; }
+.slots.compacto .slot .comp-avatar { width: 22px; height: 22px; font-size: 0.8rem; }
+/* Celular: a fichinha é estreita; o rosto vai para o canto de cima e o "i" desce, para o nome caber */
+@media (max-width: 860px) {
+  .slots.compacto .slot .com-avatar .comp-avatar { position: absolute; top: 5px; right: 5px; width: 20px; height: 20px; font-size: 0.72rem; margin: 0; }
+  .slots.compacto .slot:has(.comp-avatar) .info { top: auto; bottom: 5px; transform: none; }
+}
+
+/* Raio de cor própria: não entra no arco-íris do Bazar; cor clara ganha contorno escuro */
+.palco .raio.proprio, body.raio-arcoiris .palco .raio.proprio { animation: raio 0.6s ease-out forwards; }
+.raio.contorno { stroke: #1d1812; stroke-width: 8; opacity: 0.9; }
+.raio.fino.contorno { stroke-width: 4.5; }
+.slot.raio-claro.disparou { box-shadow: 0 0 0 2px var(--tinta), 0 0 0 5px var(--raio-cor), 0 0 26px var(--raio-cor), 0 6px 14px var(--sombra); }
+
+/* Balão com a fala do Comparsa, saindo do slot dele durante o palco */
+.balao-comparsa {
+  position: fixed; z-index: 28; pointer-events: none; transform: translate(-50%, -100%);
+  max-width: min(240px, calc(100vw - 24px)); width: max-content;
+  background: var(--papel); color: var(--tinta); border-radius: 14px; padding: 6px 12px;
+  font-family: var(--giz-fonte); font-size: 1.05rem; line-height: 1.2; text-align: center; text-wrap: balance;
+  box-shadow: 0 0 0 2px var(--raio-cor), 0 0 0 3px rgba(29, 24, 18, 0.55), 0 8px 18px rgba(0, 0, 0, 0.5);
+  animation: balao-entra 0.25s ease-out, balao-sai 0.3s ease-in 2.1s forwards;
+}
+.balao-comparsa::after {
+  content: ''; position: absolute; left: calc(50% + var(--seta, 0px)); top: 100%; translate: -50% -1px;
+  border: 8px solid transparent; border-top-color: var(--papel);
+}
+.balao-comparsa.abaixo { transform: translate(-50%, 0); }
+.balao-comparsa.abaixo::after { top: auto; bottom: 100%; translate: -50% 1px; border-top-color: transparent; border-bottom-color: var(--papel); }
+@keyframes balao-entra { from { opacity: 0; scale: 0.7; } }
+@keyframes balao-sai { to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .balao-comparsa { animation: none; } }

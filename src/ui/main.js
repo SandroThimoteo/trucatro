@@ -12,7 +12,7 @@ import { RANKS, SUITS, SUIT_NOME } from '../core/cards.js';
 import { valoresJogada } from '../core/scoring.js';
 import { proximoValor } from '../core/truco.js';
 import { novoPerfil, normalizarPerfil, comprarItem, equiparItem, itemEquipado, registrarMesa, registrarFimDeRun } from '../core/perfil.js';
-import { esc, fmt, cartaHTML, versoHTML, slotComparsa, infoBtn, avatarHTML, NOME_RARIDADE, NOME_VALOR } from './componentes.js';
+import { esc, fmt, cartaHTML, versoHTML, slotComparsa, nomeComAvatar, infoBtn, avatarHTML, NOME_RARIDADE, NOME_VALOR } from './componentes.js';
 import { audio } from './audio.js';
 import { palcoRodada, palcoMao } from './palco.js';
 import { cenaChefao, urlCenario } from './cena.js';
@@ -262,9 +262,20 @@ const MS_PALCO = reduzido
   ? { entrada: 80, passo: 60, raio: 90, total: 300 }
   : { entrada: 420, passo: 380, raio: 620, total: 900 };
 
-function nomeComparsa(uid) {
+function defComparsa(uid) {
   const inst = app.jogo?.run.comparsas.find((c) => c.uid === uid);
-  return inst ? app.dados.comparsasPorId[inst.id].nome : null;
+  return inst ? app.dados.comparsasPorId[inst.id] ?? null : null;
+}
+
+function nomeComparsa(uid) {
+  return defComparsa(uid)?.nome ?? null;
+}
+
+// Fala sorteada do Comparsa (data/falas-comparsas.json); null se ele não tiver falas
+function falaComparsa(uid) {
+  const def = defComparsa(uid);
+  const falas = def ? app.dados.falasComparsas?.[def.id] : null;
+  return Array.isArray(falas) && falas.length ? falas[Math.floor(Math.random() * falas.length)] : null;
 }
 
 // Rodada vencida: a carta vai para o centro e os Comparsas soltam raios nela (ui/palco.js)
@@ -275,6 +286,8 @@ async function animarVaza(ev) {
     cartaHtml: cartaHTML(ev.carta, { ctx, estatica: true }),
     nomeJogada: ev.fuga ? `${nomeJogada} (fuga)` : nomeJogada,
     nomeComparsa,
+    defComparsa,
+    falaComparsa,
     ms: MS_PALCO,
   });
   const ultimo = ev.passos[ev.passos.length - 1];
@@ -285,7 +298,7 @@ async function animarVaza(ev) {
 // Fim da mão: soma das rodadas, bônus e o multiplicador do truco, um por um
 async function animarMao(ev) {
   if (!ev.passos.length) return;
-  await palcoMao(ev, { titulo: ev.valor > 1 ? `Mão valendo ${ev.valor}` : 'Fim da mão', nomeComparsa, ms: MS_PALCO });
+  await palcoMao(ev, { titulo: ev.valor > 1 ? `Mão valendo ${ev.valor}` : 'Fim da mão', nomeComparsa, defComparsa, falaComparsa, ms: MS_PALCO });
   const ultimo = ev.passos[ev.passos.length - 1];
   app.conta = { jogada: 'Fim da mão', fichas: null, mult: null, origem: `+${fmt(ultimo.total)} na Mesa`, total: ultimo.total };
   desenharConta();
@@ -992,7 +1005,7 @@ function fichaPessoa(p) {
 
 function telaColecao() {
   const d = app.dados;
-  const comps = d.comparsas.map((c) => `<div class="ficha">${infoBtn('comparsa', c.id, c.nome)}<span class="raridade r-${c.raridade}">${NOME_RARIDADE[c.raridade]}</span><h3>${esc(c.nome)}</h3><p>${esc(c.descricao)}</p><div class="rodape"><span class="preco">${c.preco} réis</span></div></div>`).join('');
+  const comps = d.comparsas.map((c) => `<div class="ficha">${infoBtn('comparsa', c.id, c.nome)}<span class="raridade r-${c.raridade}">${NOME_RARIDADE[c.raridade]}</span>${nomeComAvatar(c, 'h3')}<p>${esc(c.descricao)}</p><div class="rodape"><span class="preco">${c.preco} réis</span></div></div>`).join('');
   const causos = d.causos.map((c) => `<div class="ficha">${infoBtn('causo', c.id, c.nome)}<span class="raridade" style="background:#8a5a2b">Causo</span><h3>${esc(c.nome)}</h3><p>${esc(c.descricao)}</p></div>`).join('');
   const simps = d.simpatias.map((c) => `<div class="ficha">${infoBtn('simpatia', c.id, c.nome)}<span class="raridade" style="background:#5c4a8a">Simpatia</span><h3>${esc(c.nome)}</h3><p>${esc(c.descricao)}</p></div>`).join('');
   const melhorias = [
@@ -1619,7 +1632,7 @@ function telaBoteco() {
     let corpo;
     if (it.tipo === 'comparsa') {
       const d = app.dados.comparsasPorId[it.id];
-      corpo = `${infoBtn('comparsa', d.id, d.nome)}<span class="raridade r-${d.raridade}">${NOME_RARIDADE[d.raridade]} · Comparsa</span><h3>${esc(d.nome)}</h3><p>${esc(d.descricao)}</p>`;
+      corpo = `${infoBtn('comparsa', d.id, d.nome)}<span class="raridade r-${d.raridade}">${NOME_RARIDADE[d.raridade]} · Comparsa</span>${nomeComAvatar(d, 'h3')}<p>${esc(d.descricao)}</p>`;
     } else if (it.tipo === 'carta') {
       const c = it.carta;
       const detalhes = [c.melhoria && ['melhoria', c.melhoria, app.dados.cartas.melhorias[c.melhoria]], c.selo && ['selo', c.selo, app.dados.cartas.selos[c.selo]]].filter(Boolean);

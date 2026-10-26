@@ -164,6 +164,60 @@ const EFEITOS = {
   copo() { tom({ freq: 2400 + Math.random() * 1600, dur: 0.5, pico: 0.12, destino: barramentos.ambiente }); },
 };
 
+// ---------- sons dos Comparsas (id do som = id do Comparsa) ----------
+// Curtos (até ~0,6 s) e discretos, porque repetem a cada disparo. O passo sobe o tom de leve.
+
+const subida = (passo) => 2 ** (Math.min(Math.max(Number(passo) || 0, 0), 12) / 24);
+
+const SONS_COMPARSA = {
+  // giz riscando a lousa: 3 riscos ásperos com um rangido fininho
+  marcador_de_giz(passo) {
+    const t = ctx.currentTime;
+    const k = subida(passo);
+    [0, 0.11, 0.2].forEach((d, i) => {
+      chiado({ t: t + d, dur: i === 2 ? 0.12 : 0.08, freq: (3600 + Math.random() * 900) * k, q: 2.5, pico: 0.3 });
+      tom({ freq: (2100 + i * 140) * k, tipo: 'square', t: t + d, dur: 0.06, pico: 0.025, filtro: 4000 });
+    });
+  },
+  // radinho de pilha: chiado de rádio e um "gooool" curto subindo, abafado
+  torcedor_sofredor(passo) {
+    const t = ctx.currentTime;
+    const k = subida(passo);
+    chiado({ t, dur: 0.5, freq: 1700, q: 1.5, pico: 0.07 });
+    tom({ freq: 240 * k, tipo: 'sawtooth', t: t + 0.04, dur: 0.48, pico: 0.09, ataque: 0.06, deslize: 380 * k, filtro: 1800 });
+    tom({ freq: 480 * k, tipo: 'square', t: t + 0.04, dur: 0.45, pico: 0.03, ataque: 0.06, deslize: 760 * k, filtro: 1500 });
+  },
+  // soco no balcão de madeira: baque grave e os copos chacoalhando
+  brigao_da_esquina(passo) {
+    const t = ctx.currentTime;
+    const k = subida(passo);
+    tom({ freq: 85 * k, tipo: 'sine', t, dur: 0.26, pico: 0.9, deslize: 38 });
+    chiado({ t, dur: 0.09, freq: 450, q: 0.8, pico: 0.55, tipo: 'lowpass' });
+    for (let i = 0; i < 3; i++) tom({ freq: 2600 + Math.random() * 1400, t: t + 0.05 + i * 0.045 + Math.random() * 0.02, dur: 0.16, pico: 0.07 });
+  },
+  // apito de juiz: dois trinados agudos
+  tecnico_da_varzea(passo) {
+    const t = ctx.currentTime;
+    const k = subida(passo);
+    [[0, 6], [0.2, 8]].forEach(([d, n]) => {
+      for (let i = 0; i < n; i++) {
+        tom({ freq: (i % 2 ? 2750 : 2950) * k, tipo: 'triangle', t: t + d + i * 0.024, dur: 0.03, pico: 0.09, ataque: 0.003 });
+      }
+      chiado({ t: t + d, dur: n * 0.024, freq: 2900 * k, q: 6, pico: 0.05 });
+    });
+  },
+  // sinuca: taco na bola (clack), a bola rolando e o "tum" na caçapa
+  rei_da_sinuca(passo) {
+    const t = ctx.currentTime;
+    const k = subida(passo);
+    tom({ freq: 1900 * k, tipo: 'triangle', t, dur: 0.05, pico: 0.25 });
+    chiado({ t, dur: 0.03, freq: 3200, q: 2, pico: 0.3 });
+    chiado({ t: t + 0.07, dur: 0.28, freq: 700, q: 0.9, pico: 0.1, tipo: 'lowpass' });
+    tom({ freq: 120 * k, tipo: 'sine', t: t + 0.38, dur: 0.2, pico: 0.6, deslize: 60 });
+    chiado({ t: t + 0.38, dur: 0.06, freq: 350, q: 0.8, pico: 0.25, tipo: 'lowpass' });
+  },
+};
+
 // ---------- ambiente: burburinho + copos ----------
 
 function ligarAmbiente() {
@@ -296,6 +350,14 @@ export const audio = {
   tocar(nome, arg) {
     if (!ctx || ctx.state !== 'running' || opcoes.mudo || !opcoes.efeitos) return;
     try { EFEITOS[nome]?.(arg); } catch { /* som nunca derruba o jogo */ }
+  },
+  // Disparo de Comparsa: som próprio (def.som) ou, sem som próprio, o raio comum.
+  tocarComparsa(somId, passo = 0) {
+    if (!ctx || ctx.state !== 'running' || opcoes.mudo || !opcoes.efeitos) return;
+    try {
+      const som = typeof somId === 'string' && Object.hasOwn(SONS_COMPARSA, somId) ? SONS_COMPARSA[somId] : EFEITOS.raio;
+      som(passo);
+    } catch { /* som nunca derruba o jogo */ }
   },
   // voz: { tom: 0.5–1.6, vel: 0.8–1.3, genero: 'm' | 'f' }
   falar(texto, voz = {}) {

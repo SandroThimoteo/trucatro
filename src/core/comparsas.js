@@ -70,6 +70,72 @@ export const EFEITOS = {
       if (n > 0) ctx.multiplicar(e.valor ** n, def.nome, inst.uid);
     },
   },
+  // ---------- Comparsas novos (out/2026) ----------
+  // Marcador de Giz: +Mult por tento do adversário. Os tentos são lidos da Mesa
+  // nos eventos que vêm antes da pontuação e guardados no estado do Comparsa.
+  multPorTentoAdv: {
+    registrar(bus, e, inst, def, jogo) {
+      const ler = () => { inst.estado.tentos = jogo.run.mesa?.tentosAdv ?? 0; };
+      for (const tipo of ['OnMesaIniciada', 'OnMaoDistribuida', 'OnVazaResolvida', 'OnTrucoRespondido', 'OnPoderUsado']) bus.on(tipo, ler, DONO_COMPARSAS);
+    },
+    mult(ctx, e, inst, def) {
+      const t = inst.estado.tentos ?? 0;
+      if (t > 0) ctx.addMult(e.valor * t, def.nome, inst.uid);
+    },
+  },
+  // Torcedor Sofredor: ×pontos da mão vencida Na Raça (ganhou, perdeu, ganhou).
+  maoXMultNaRaca: {
+    registrar(bus, e, inst, def, jogo) {
+      bus.on('OnMaoDistribuida', () => { inst.estado.resultados = []; }, DONO_COMPARSAS);
+      bus.on('OnVazaResolvida', (ev) => {
+        (inst.estado.resultados ??= []).push(ev.vaza?.vencedor);
+      }, DONO_COMPARSAS);
+    },
+    mao(ctx, e, inst, def) {
+      if ((inst.estado.resultados ?? []).join() === '0,1,0') ctx.multiplicar(e.valor, def.nome, inst.uid);
+    },
+  },
+  // Brigão da Esquina: +Mult nas rodadas da mão em que o adversário aceitou (ou aumentou) seu truco.
+  multTrucoAceito: {
+    registrar(bus, e, inst, def, jogo) {
+      bus.on('OnMaoDistribuida', () => { inst.estado.aceitou = false; }, DONO_COMPARSAS);
+      bus.on('OnTrucoRespondido', (ev) => {
+        if (inst.desativada || (ev.time ?? ev.jogador) !== 1) return;
+        if (ev.resposta === 'aceitar' || ev.resposta === 'aumentar') inst.estado.aceitou = true;
+      }, DONO_COMPARSAS);
+    },
+    mult(ctx, e, inst, def) {
+      if (inst.estado.aceitou) ctx.addMult(e.valor, def.nome, inst.uid);
+    },
+  },
+  // Técnico da Várzea: +Fichas por rodada vencida para cada uso do poder do personagem nesta Mesa (até maxUsos).
+  fichasPorPoderUsado: {
+    registrar(bus, e, inst, def, jogo) {
+      bus.on('OnMesaIniciada', () => { inst.estado.poderes = 0; }, DONO_COMPARSAS);
+      bus.on('OnPoderUsado', () => { inst.estado.poderes = jogo.run.mesa?.poderUsos ?? (inst.estado.poderes ?? 0) + 1; }, DONO_COMPARSAS);
+    },
+    fichas(ctx, e, inst, def) {
+      const n = Math.min(inst.estado.poderes ?? 0, e.maxUsos ?? Infinity);
+      if (n > 0) ctx.addFichas(e.valor * n, def.nome, inst.uid);
+    },
+  },
+  // Rei da Sinuca: rodada vencida com manilha ganha ×Mult conforme quantos naipes
+  // de manilha diferentes você já venceu nesta Mesa (contando a atual).
+  xmultNaipesManilha: {
+    registrar(bus, e, inst, def, jogo) {
+      bus.on('OnMesaIniciada', () => { inst.estado.naipes = []; }, DONO_COMPARSAS);
+      bus.on('OnVazaPontuada', (ev) => {
+        if (inst.desativada || !['manilhada', 'zapada'].includes(ev.jogada)) return;
+        const naipes = (inst.estado.naipes ??= []);
+        if (!naipes.includes(ev.carta.suit)) naipes.push(ev.carta.suit);
+      }, DONO_COMPARSAS);
+    },
+    xmult(ctx, e, inst, def) {
+      if (!ctx.manilha && !ctx.zap && !['manilhada', 'zapada'].includes(ctx.jogada)) return;
+      const naipes = new Set([...(inst.estado.naipes ?? []), ctx.carta.suit]);
+      ctx.mulMult(1 + e.porNaipe * naipes.size, def.nome, inst.uid);
+    },
+  },
   // Regras consultadas pelo motor (sem fase de pontuação)
   picaFumoPirata: {},
   viraDupla: {},
