@@ -1349,7 +1349,7 @@ function poderHTML(j) {
     <span class="avatar" aria-hidden="true">${esc(jg.avatar)}</span>
     <div><b>${esc(jg.nome)}</b> ${infoBtn('poder', jg.id, p.nome)}<br><small>${esc(p.descricao)}</small></div>
     <button class="btn amarelo peq acao" data-acao="poder" ${motivo ? `disabled title="${esc(motivo)}"` : ''}>⚡ ${esc(p.nome)} <small>(${custo})</small></button>
-    ${motivo && p.id === 'embaralhada' && app.sel.length !== 1 ? '<small class="rotulo">Na sua vez, selecione 1 carta e toque no poder.</small>' : ''}
+    ${motivo && p.id === 'embaralhada' && app.sel.length !== 1 ? '<small class="rotulo poder-dica" style="grid-column:1/-1;flex:1 1 100%">Na sua vez, selecione 1 carta e toque no poder.</small>' : ''}
   </div>`;
 }
 
