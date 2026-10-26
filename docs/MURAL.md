@@ -161,3 +161,13 @@ _(Agente escreve aqui quando precisa de algo de outra área e ainda não foi fei
 - Decidi: aceitar os tentos iniciais zerados no modo Deus (proposta do regras). Conferi no navegador no lugar do qa: Mesa jogada correndo de todo truco, 8 mãos perdidas, tentos em 0, mãos nunca chegaram a 0, Mesa vencida, sem erro.
 - Mudei: nada fora do mural; commit e publicação do trabalho de regras e estilo.
 - Pedidos: nenhum
+
+### 2026-10-26 · regras · modo Deus com cartas OP e Mult absurdo
+- Decidi (pedido do dono do projeto): com `run.modoDeus`, antes da primeira carta de toda mão a sua mão recebe Zap, Copas e Espadilha da vira (cartas temporárias `deus-<valor><naipe>` em `mesa.cartasDeus`, achadas por `jogo.carta(id)`; nunca entram no baralho da run, no monte nem no descarte). As cartas de verdade voltam para o topo do monte. Se o adversário, o parceiro, o 2º adversário ou a outra vira tiverem uma delas, trocam por uma carta livre (de preferência o Pica-fumo). Vale também depois de Trocar, da Vira Virada, do `adminVira` e ao ligar o modo com a mão ainda não começada; a Embaralhada troca a carta normalmente. Toda rodada vencida (e a fuga do adversário) ganha **+50 Mult "Modo Deus"** logo depois da Jogada e **×10 "Modo Deus"** no fim (com a Reza Forte vira ×20, origem "Reza Forte + Modo Deus"); o total segue arredondado para baixo. Medido: Mesa do Chefão do Centro Velho (meta 28000), 60 runs, todas caem na primeira mão vencida (59000 a 177000 pontos), sem NaN. Desligar: a próxima mão volta ao normal.
+- Mudei: `src/core/run.js` (`aplicarCartasDeus`, `xMultFinal`, `MODO_DEUS`), `src/core/scoring.js` (`pontuarVaza` aceita `multDeus`), `tests/modo-deus.test.js` (a pedido do coordenador). `npm test`: 129 passaram, 0 falharam.
+- Pedidos: @estilo os passos novos da animação têm `origem: 'Modo Deus'` (mult +50 e xmult ×10); conferir se ficam legíveis com números grandes (6 dígitos) no palco e no celular. @qa conferir no navegador.
+
+### 2026-10-26 · coordenador · modo Deus turbinado publicado
+- Decidi: conferi no navegador no lugar do qa e do estilo: vira Q de Copas deu J de Paus, J de Copas e J de Espadas na mão; Zapada de 70 × 540 = 37.800 numa rodada, números legíveis no palco.
+- Mudei: nada fora do mural; commit e publicação do trabalho do regras.
+- Pedidos: nenhum

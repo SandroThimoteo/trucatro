@@ -72,7 +72,7 @@ export class ScoreContext {
 }
 
 // pessoa: personagem da Mesa (chefão ou não), com nome e regras (manha). "chefao" é o nome antigo.
-export function pontuarVaza({ dados, carta, jogada, ctxForca, niveis, comparsas = [], pessoa = null, chefao = pessoa, bonusMult = 0, xMultFinal = null, info = {} }) {
+export function pontuarVaza({ dados, carta, jogada, ctxForca, niveis, comparsas = [], pessoa = null, chefao = pessoa, bonusMult = 0, xMultFinal = null, multDeus = 0, info = {} }) {
   const ctx = new ScoreContext({
     fase: 'vaza', carta, jogada,
     manilha: isManilha(carta, ctxForca),
@@ -88,6 +88,8 @@ export function pontuarVaza({ dados, carta, jogada, ctxForca, niveis, comparsas 
   ctx.addFichas(vj.fichas, vj.nome);
   ctx.addMult(vj.mult, vj.nome);
   if (bonusMult) ctx.addMult(bonusMult, 'Cangada anterior');
+  // Modo Deus (admin): Mult extra no início da conta
+  if (multDeus) ctx.addMult(multDeus, 'Modo Deus');
 
   // Manha da Mesa (personagem): bônus antes das melhorias e dos Comparsas
   const rm = chefao?.regras ?? {};

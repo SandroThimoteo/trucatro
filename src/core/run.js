@@ -10,6 +10,10 @@ import { regraAtiva, registrarComparsas } from './comparsas.js';
 import { GameEventBus } from './events.js';
 import { defConsumivel, perfilDe, falasDe } from './dados.js';
 
+// Modo Deus (admin): cartas temporárias com id "deus-..." e bônus de pontos por rodada vencida
+const MODO_DEUS = { mult: 50, xMult: 10 };
+const ehCartaDeus = (id) => typeof id === 'string' && id.startsWith('deus-');
+
 export const TIPOS_MESA = ['bar', 'fundo', 'chefao'];
 export const NOME_MESA = { bar: 'Mesa do Bar', fundo: 'Mesa do Fundo', chefao: 'Mesa do Chefão' };
 
@@ -132,7 +136,7 @@ export class Jogo {
   }
 
   carta(id) {
-    return this.run.deck.find((c) => c.id === id);
+    return this.run.deck.find((c) => c.id === id) ?? this.run.mesa?.cartasDeus?.find((c) => c.id === id);
   }
 
   get rodada() {
@@ -439,7 +443,9 @@ export class Jogo {
     const m = r.mesa;
     const R = this.dados.regras;
     // Cartas que saíram do baralho (Causo do Fogo, vidro quebrado) somem da mão e da pilha
-    const existe = (id) => !!this.carta(id);
+    // (as cartas temporárias do modo Deus nunca passam de uma mão para outra)
+    m.cartasDeus = [];
+    const existe = (id) => !ehCartaDeus(id) && !!this.carta(id);
     m.mao = m.mao.filter(existe);
     m.compra = m.compra.filter(existe);
     m.descarte = m.descarte.filter(existe);
@@ -507,6 +513,7 @@ export class Jogo {
       }
     }
     delete rd.restoAdv;
+    this.aplicarCartasDeus();
     rd.reveladas = rd.maoAdv.slice(0, this.regrasMesa.revelaCartas ?? 0).map((c) => c.id);
     this.atualizarCara();
     if (rd.maoParceiro) {
@@ -533,9 +540,49 @@ export class Jogo {
     if (m.trocasRestantes <= 0) throw new Error('Sem trocas nesta Mesa');
     if (!ids.length || !ids.every((id) => m.mao.includes(id))) throw new Error('Selecione cartas da sua mão');
     m.mao = m.mao.filter((id) => !ids.includes(id));
-    m.descarte.push(...ids);
+    m.descarte.push(...ids.filter((id) => !ehCartaDeus(id)));
     m.trocasRestantes--;
     this.comprarAte(m.tamanhoMao);
+    this.aplicarCartasDeus();
+  }
+
+  // ---------- modo Deus: cartas OP ----------
+  // Antes da primeira carta da mão, a sua mão recebe Zap, Copas e Espadilha da vira. São cartas
+  // temporárias (ids "deus-..."), fora do baralho da run; as cartas de verdade voltam ao monte.
+  // Ninguém mais na mesa (adversário, parceiro, outra vira) fica com uma carta igual.
+  aplicarCartasDeus() {
+    const m = this.run.mesa;
+    const rd = this.rodada;
+    if (!this.modoDeus || !m || !rd?.vira || rd.mao) return;
+    const vis = (c) => `${c.rank}${c.suit}`;
+    const mr = manilhaRank(rd.vira);
+    const novas = ['paus', 'copas', 'espadas'].map((suit) => criarCarta(`deus-${mr}${suit}`, mr, suit));
+    const D = new Set(novas.map(vis));
+    m.cartasDeus = novas;
+    // suas cartas de verdade: as que sobram do tamanho da mão ficam; o resto volta para o topo do monte
+    const reais = m.mao.filter((id) => !ehCartaDeus(id));
+    const ficam = [];
+    for (const id of reais) {
+      if (ficam.length < m.tamanhoMao - novas.length && !D.has(vis(this.carta(id)))) ficam.push(id);
+      else m.compra.push(id);
+    }
+    m.mao = [...novas.map((c) => c.id), ...ficam];
+    this.comprarAte(m.tamanhoMao);
+    // regra de não repetir carta: tira Zap/Copas/Espadilha de quem mais estiver com elas
+    const outras = [rd.maoAdv, rd.maoParceiro, rd.maoAdv2].filter(Boolean);
+    const usadas = new Set([...m.mao.map((id) => vis(this.carta(id))), ...rd.viras.map(vis), ...outras.flat().map(vis)]);
+    const livres = baralhoPadrao('o').filter((c) => !usadas.has(vis(c)));
+    const repor = () => {
+      const i = Math.max(0, livres.findIndex((c) => c.rank === mr)); // de preferência o Pica-fumo
+      return livres.splice(i, 1)[0];
+    };
+    for (const lista of outras) {
+      for (let i = 0; i < lista.length; i++) if (D.has(vis(lista[i]))) lista[i] = repor();
+    }
+    for (let i = 0; i < rd.viras.length; i++) {
+      if (rd.viras[i] !== rd.vira && D.has(vis(rd.viras[i]))) rd.viras[i] = repor();
+    }
+    this.atualizarCara();
   }
 
   // ---------- cara do adversário ----------
@@ -598,7 +645,7 @@ export class Jogo {
       const i = st.maos[0].findIndex((c) => c.id === id);
       if (i < 0) throw new Error('Selecione 1 carta da mão');
       m.mao = m.mao.filter((x) => x !== id);
-      m.descarte.push(id);
+      if (!ehCartaDeus(id)) m.descarte.push(id);
       this.comprarAte(m.mao.length + 1);
       const nova = m.mao[m.mao.length - 1];
       st.maos[0][i] = clone(this.carta(nova));
@@ -622,6 +669,7 @@ export class Jogo {
         rd.sinais = { ...rd.sinais, 1: sinalDaMao(rd.maoAdv, ctx), 2: sinalDaMao(rd.maoParceiro, ctx), 3: sinalDaMao(rd.maoAdv2, ctx) };
       }
       this.atualizarCara();
+      this.aplicarCartasDeus();
       texto = `Vira Virada: nova vira ${rd.vira.rank}`;
     }
 
@@ -646,9 +694,20 @@ export class Jogo {
     return !!this.run.modoDeus;
   }
 
+  // Multiplicador final da rodada: Reza Forte (×2) e modo Deus (×10) juntos
+  xMultFinal(rezaForte) {
+    const x = (rezaForte ? 2 : 1) * (this.modoDeus ? MODO_DEUS.xMult : 1);
+    if (x === 1) return null;
+    const origem = [rezaForte && 'Reza Forte', this.modoDeus && 'Modo Deus'].filter(Boolean).join(' + ');
+    return { valor: x, origem };
+  }
+
   adminModoDeus(ligado) {
     this.run.modoDeus = !!ligado;
-    if (ligado) this.marcarTeste();
+    if (ligado) {
+      this.marcarTeste();
+      this.aplicarCartasDeus(); // se a mão ainda não começou, já vale para ela
+    }
   }
 
   // Troca a i-ésima carta da sua mão por outra (valor e naipe)
@@ -674,6 +733,7 @@ export class Jogo {
     if (rd.mao) rd.mao.vira = rd.vira;
     if (rd.fase === 'vira') rd.fase = 'troca';
     this.atualizarCara();
+    this.aplicarCartasDeus();
     this.marcarTeste();
   }
 
@@ -790,7 +850,7 @@ export class Jogo {
     for (const ev of eventos) {
       if (ev.tipo === 'OnCartaJogada' && ev.jogador === 0) {
         m.mao = m.mao.filter((id) => id !== ev.carta.id);
-        m.descarte.push(ev.carta.id);
+        if (!ehCartaDeus(ev.carta.id)) m.descarte.push(ev.carta.id);
       }
       this.emit(ev.tipo, ev);
       if (ev.tipo === 'OnVazaResolvida') this.aoResolverVaza(ev.vaza);
@@ -818,7 +878,7 @@ export class Jogo {
     const sc = pontuarVaza({
       dados: this.dados, carta: minha, jogada, ctxForca: ctxF, niveis: this.run.niveis,
       comparsas: this.run.comparsas, pessoa: this.pessoa, bonusMult: rd.bonusMultProxima,
-      xMultFinal: rd.rezaForte ? { valor: 2, origem: 'Reza Forte' } : null,
+      xMultFinal: this.xMultFinal(rd.rezaForte), multDeus: this.modoDeus ? MODO_DEUS.mult : 0,
       info: {
         vazaIndice: vaza.indice,
         vazasVencidasAntes: rd.vazasPontuadas.length,
@@ -848,6 +908,7 @@ export class Jogo {
     const sc = pontuarVaza({
       dados: this.dados, carta: melhor, jogada, ctxForca: ctxF, niveis: this.run.niveis,
       comparsas: this.run.comparsas, pessoa: this.pessoa, bonusMult: rd.bonusMultProxima,
+      xMultFinal: this.xMultFinal(false), multDeus: this.modoDeus ? MODO_DEUS.mult : 0,
       info: {
         vazaIndice: st.vazas.length,
         vazasVencidasAntes: rd.vazasPontuadas.length,
